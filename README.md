@@ -47,10 +47,18 @@ ducat-gui [-d FILE] [PATH]
 
 Browses the stored directories: `PATH`, or the first stored directory. Entries
 can be sorted by any column, by default by disk usage. Enter or a double click
-opens a folder, Alt+Up or Backspace goes to the parent, F5 reads the directory
-from the database again, and a path typed into the bar opens that directory.
-The GUI does not scan yet; use `ducat scan`. It opens the database only for the
-moment of each read, so `ducat scan` can run while the GUI is open.
+opens a folder, Alt+Up or Backspace goes to the parent, and a path typed into
+the bar opens that directory.
+
+Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
+scans the shown directory again, which updates the directories above it as
+`ducat scan` does. Scans run in the background, with the number of entries
+read and, when refreshing, the progress against the stored count; the button
+next to them stops a scan without changing the database. One file system,
+on by default, keeps scans from descending into other file systems.
+
+The GUI opens the database only for the moment of each read or write, so
+`ducat scan` can run while the GUI is open.
 
 ## Building
 

@@ -132,6 +132,10 @@ private:
             wake_.wait(lock, [this] { return !stack_.empty() || busy_ == 0 || failure_; });
             if (failure_ || stack_.empty())
                 break; // busy_ == 0: nothing left that could add work
+            if (options_.progress && options_.progress->cancel.load(std::memory_order_relaxed)) {
+                failure_ = std::make_exception_ptr(ScanCancelled());
+                break;
+            }
             DirTask* task = stack_.back();
             stack_.pop_back();
             ++busy_;
@@ -205,6 +209,11 @@ private:
             init_node(child, st);
             if (child.is_dir && !(options_.one_file_system && st.st_dev != root_dev_))
                 subdirs.push_back(node.children.size() - 1);
+        }
+
+        if (ScanProgress* progress = options_.progress) {
+            progress->entries.fetch_add(node.children.size(), std::memory_order_relaxed);
+            progress->dirs.fetch_add(1, std::memory_order_relaxed);
         }
 
         if (subdirs.empty()) {

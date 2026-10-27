@@ -348,26 +348,42 @@ std::string default_database_path()
     return (dir / "ducat" / "ducat.tkt").string();
 }
 
-RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options)
+PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& options)
 {
-    const std::string root = resolve_path(path);
-    const std::optional<Node> parent =
-        root == "/" ? std::nullopt : stat_directory(split_path(root).first);
-    const Node* parent_own = parent ? &*parent : nullptr;
-
-    RefreshResult result;
+    PreparedRefresh prepared;
+    prepared.root = resolve_path(path);
+    if (prepared.root != "/")
+        prepared.parent = stat_directory(split_path(prepared.root).first);
     try {
-        result.scan = scan_tree(root, options);
+        prepared.scan = scan_tree(prepared.root, options);
     } catch (const std::system_error& e) {
         const int error = e.code().value();
-        if ((error != ENOENT && error != ENOTDIR) || !db.read_directory(root))
+        if (error != ENOENT && error != ENOTDIR)
             throw;
-        db.remove(root, parent_own);
+        prepared.scan_error = error;
+    }
+    return prepared;
+}
+
+RefreshResult apply_refresh(Database& db, PreparedRefresh prepared)
+{
+    const Node* parent_own = prepared.parent ? &*prepared.parent : nullptr;
+    RefreshResult result;
+    if (!prepared.scan) {
+        if (!db.read_directory(prepared.root))
+            throw std::system_error(prepared.scan_error, std::generic_category(), prepared.root);
+        db.remove(prepared.root, parent_own);
         result.removed = true;
         return result;
     }
-    db.store(result.scan, parent_own);
+    db.store(*prepared.scan, parent_own);
+    result.scan = std::move(*prepared.scan);
     return result;
+}
+
+RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options)
+{
+    return apply_refresh(db, prepare_refresh(path, options));
 }
 
 } // namespace ducat

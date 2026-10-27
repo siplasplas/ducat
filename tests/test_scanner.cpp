@@ -219,10 +219,32 @@ void test_threads()
     }
 }
 
+void test_progress_and_cancel()
+{
+    TempDir temp;
+    make_wide_tree(temp.path(), 3, 4); // 85 directories, 255 files
+
+    ducat::ScanProgress progress;
+    const ducat::ScanResult result = ducat::scan_tree(temp.path().string(), {false, 8, &progress});
+    CHECK_EQ(progress.entries.load(), result.root.files + result.root.dirs);
+    CHECK_EQ(progress.dirs.load(), result.root.dirs + 1);
+
+    ducat::ScanProgress cancelled;
+    cancelled.cancel = true;
+    bool thrown = false;
+    try {
+        ducat::scan_tree(temp.path().string(), {false, 8, &cancelled});
+    } catch (const ducat::ScanCancelled&) {
+        thrown = true;
+    }
+    CHECK(thrown);
+}
+
 int main()
 {
     test_tree();
     test_bad_root();
     test_threads();
+    test_progress_and_cancel();
     return check::result();
 }

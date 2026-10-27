@@ -97,16 +97,32 @@ private:
 // ~/.cache when that is not set.
 std::string default_database_path();
 
+// The file-system part of a refresh, done without the database so that the
+// database is open only for the short apply_refresh.
+struct PreparedRefresh {
+    std::string root;              // resolved path
+    std::optional<Node> parent;    // own data of the directory above the root
+    std::optional<ScanResult> scan;
+    int scan_error = 0;            // ENOENT or ENOTDIR when the root is gone
+};
+
 struct RefreshResult {
     ScanResult scan;               // empty when the tree was removed
     bool removed = false;          // the path no longer exists and was removed
 };
 
-// Scans the tree at `path` (resolved with resolve_path) and stores it, with
-// fresh own data of the directory above it, so that a whole stored tree or
-// one branch of it is brought up to date. When `path` no longer exists but
-// is stored, removes it from the database instead. Throws std::system_error
-// when `path` cannot be scanned otherwise.
+// Scans the tree at `path` (resolved with resolve_path) and reads the own
+// data of the directory above it. A root that no longer exists is recorded
+// in scan_error; other failures throw std::system_error, and a cancelled
+// scan throws ScanCancelled.
+PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& options = {});
+
+// Stores a prepared scan, which brings a whole stored tree or one branch of
+// it up to date, or removes a root that no longer exists. Throws
+// std::system_error with scan_error when that root is not stored either.
+RefreshResult apply_refresh(Database& db, PreparedRefresh prepared);
+
+// prepare_refresh followed by apply_refresh.
 RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options = {});
 
 } // namespace ducat
