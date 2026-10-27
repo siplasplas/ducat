@@ -17,18 +17,10 @@ endif()
 option(BUILD_SHARED_LIBS "Build libducat as a shared library" OFF)
 option(DUCAT_BUILD_TESTS "Build the unit tests" ON)
 
-# Optional dependencies, detected now and required by later stages:
-# Tkrzw for the database, Qt for the GUI.
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(TKRZW QUIET IMPORTED_TARGET tkrzw)
-endif()
-if(TKRZW_FOUND)
-    message(STATUS "Tkrzw: ${TKRZW_VERSION}")
-else()
-    message(STATUS "Tkrzw: not found (install libtkrzw-dev)")
-endif()
+# Tkrzw stores the database.
+include(cmake/Tkrzw.cmake)
 
+# Qt is optional for now, detected for the planned GUI.
 find_package(Qt6 QUIET COMPONENTS Widgets)
 if(Qt6_FOUND)
     message(STATUS "Qt: ${Qt6_VERSION}")

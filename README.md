@@ -26,7 +26,7 @@ on; the exit status is then 1.
 
 ## Building
 
-Requirements: CMake 3.20 or newer and a C++20 compiler.
+Requirements: CMake 3.20 or newer, a C++20 compiler and `make`.
 
 ```sh
 cmake -S . -B build
@@ -34,11 +34,14 @@ cmake --build build
 ./build/cli/ducat --version
 ```
 
-Optional dependencies, needed by later stages (the database and the GUI):
+The database uses [Tkrzw](https://dbmx.net/tkrzw/). The first build downloads
+Tkrzw 1.0.34 (checked by SHA-256) and builds it as a static library inside the
+build directory, which needs network access once. To use the system library
+instead, configure with `-DDUCAT_SYSTEM_TKRZW=ON`; configuration then checks
+that it can remove records, which the Ubuntu package `libtkrzw-dev` 1.0.32
+cannot.
 
-```sh
-sudo apt install libtkrzw-dev qt6-base-dev
-```
+Optional: Qt 6 (`sudo apt install qt6-base-dev`) for the planned GUI.
 
 Pass `-DBUILD_SHARED_LIBS=ON` to build `libducat` as a shared library.
 
