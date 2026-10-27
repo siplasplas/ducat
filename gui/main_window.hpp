@@ -59,6 +59,11 @@ public:
     // brings the window to the front.
     void show_entry(const std::string& folder, const std::string& name);
 
+    // Switches to another database file, which may not exist yet, shows its
+    // first tree and remembers it for the next start. Does nothing while a
+    // scan runs.
+    void set_database(const std::string& file);
+
 private:
     // The result of a background scan, passed back to the GUI thread.
     struct ScanOutcome {
@@ -75,6 +80,8 @@ private:
     void open_entry(const QModelIndex& index);
     void open_typed_path();
     void choose_and_scan();
+    void choose_database();
+    void update_title();
     void fill_trees_menu();
     void show_search();
     void update_progress();
@@ -92,6 +99,7 @@ private:
     QAction* refresh_action_;
     QAction* scan_action_;
     QAction* one_file_system_action_;
+    QAction* database_action_;
     QMenu* trees_menu_;
     SearchDialog* search_dialog_ = nullptr; // created when first needed
     QLabel* progress_label_;

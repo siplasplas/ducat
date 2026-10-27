@@ -109,6 +109,11 @@ read and, when refreshing, the progress against the stored count; the button
 next to them stops a scan without changing the database. One file system,
 on by default, keeps scans from descending into other file systems.
 
+Database… (Ctrl+D) switches to another database file, or names a new one,
+which the first Scan Folder creates; the window title shows the file. The GUI
+starts with the database given by `-d`, else with the one chosen last if it
+still exists, else with the default one.
+
 The GUI opens the database only for the moment of each read or write, so
 `ducat scan` can run while the GUI is open.
 

@@ -22,6 +22,9 @@ public:
     // Updates the scope shown for "the current directory".
     void update_scope();
 
+    // Forgets the listed matches, e.g. after switching to another database.
+    void clear_results();
+
 private:
     void run_search();
     void clear_criteria();

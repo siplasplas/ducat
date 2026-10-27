@@ -11,6 +11,7 @@
 #include <QAction>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QHeaderView>
 #include <QIcon>
 #include <QKeySequence>
@@ -19,6 +20,7 @@
 #include <QLocale>
 #include <QMenu>
 #include <QProgressBar>
+#include <QSettings>
 #include <QStatusBar>
 #include <QStyle>
 #include <QTimer>
@@ -104,6 +106,10 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     one_file_system_action_->setToolTip(
         tr("Do not descend into other file systems when scanning, like du -x"));
 
+    database_action_ = toolbar->addAction(icon("document-open", QStyle::SP_DialogOpenButton),
+                                          tr("Database…"), this, &MainWindow::choose_database);
+    database_action_->setShortcut(Qt::CTRL | Qt::Key_D);
+
     path_edit_->setClearButtonEnabled(true);
     connect(path_edit_, &QLineEdit::returnPressed, this, &MainWindow::open_typed_path);
     toolbar->addWidget(path_edit_);
@@ -143,7 +149,7 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     progress_timer_->setInterval(100);
     connect(progress_timer_, &QTimer::timeout, this, &MainWindow::update_progress);
 
-    setWindowTitle(tr("ducat"));
+    update_title();
     resize(900, 600);
 }
 
@@ -189,7 +195,7 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
 
     const QString shown = to_qstring(current_);
     path_edit_->setText(shown);
-    setWindowTitle(tr("%1 – ducat").arg(shown));
+    update_title();
     statusBar()->clearMessage();
     if (search_dialog_)
         search_dialog_->update_scope();
@@ -254,6 +260,7 @@ void MainWindow::start_scan(const std::string& path)
     refresh_action_->setEnabled(false);
     scan_action_->setEnabled(false);
     one_file_system_action_->setEnabled(false);
+    database_action_->setEnabled(false);
     progress_label_->show();
     progress_bar_->show();
     cancel_button_->show();
@@ -332,6 +339,7 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
     refresh_action_->setEnabled(true);
     scan_action_->setEnabled(true);
     one_file_system_action_->setEnabled(true);
+    database_action_->setEnabled(true);
 
     if (outcome.cancelled) {
         show_error(tr("Scan of %1 stopped; the database is unchanged").arg(to_qstring(outcome.root)));
@@ -438,6 +446,53 @@ void MainWindow::fill_trees_menu()
         const std::string root = tree.root;
         connect(action, &QAction::triggered, this, [this, root] { open_directory(root); });
     }
+}
+
+void MainWindow::choose_database()
+{
+    // Qt's own dialog, like Scan Folder. A new name is accepted too; the
+    // file is created by the first scan.
+    const QString chosen = QFileDialog::getSaveFileName(
+        this, tr("Open or Create Database"), to_qstring(database_),
+        tr("ducat databases (*.tkt);;All files (*)"), nullptr,
+        QFileDialog::DontUseNativeDialog | QFileDialog::DontConfirmOverwrite);
+    if (!chosen.isEmpty())
+        set_database(chosen.toStdString());
+}
+
+void MainWindow::set_database(const std::string& file)
+{
+    if (scan_thread_.joinable())
+        return; // the scan writes to the current database
+    database_ = file;
+    QSettings().setValue(QStringLiteral("database"), to_qstring(database_));
+
+    current_.clear();
+    model_->set_rows({});
+    totals_->clear();
+    path_edit_->clear();
+    if (search_dialog_)
+        search_dialog_->clear_results();
+    update_title();
+
+    if (!std::filesystem::exists(database_)) {
+        show_error(tr("New database %1; it is created by the first Scan Folder")
+                       .arg(to_qstring(database_)));
+        if (search_dialog_)
+            search_dialog_->update_scope();
+        return;
+    }
+    if (!open_first_directory() && search_dialog_)
+        search_dialog_->update_scope();
+}
+
+void MainWindow::update_title()
+{
+    const QString file = QFileInfo(to_qstring(database_)).fileName();
+    setWindowTitle(current_.empty() ? tr("%1 – ducat").arg(file)
+                                    : tr("%1 – %2 – ducat").arg(to_qstring(current_), file));
+    database_action_->setToolTip(
+        tr("Open another database, or name a new one (Ctrl+D); now %1").arg(to_qstring(database_)));
 }
 
 void MainWindow::choose_and_scan()

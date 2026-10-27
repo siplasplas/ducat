@@ -244,6 +244,11 @@ void SearchDialog::clear_criteria()
          {name_, extensions_, min_size_, max_size_, min_files_, max_files_, newer_, older_})
         edit->clear();
     apparent_->setChecked(false);
+    clear_results();
+}
+
+void SearchDialog::clear_results()
+{
     model_->set_rows({});
     status_->clear();
 }
