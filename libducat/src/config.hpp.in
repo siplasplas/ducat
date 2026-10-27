@@ -1,0 +1,3 @@
+#pragma once
+
+#define DUCAT_VERSION "@PROJECT_VERSION@"
