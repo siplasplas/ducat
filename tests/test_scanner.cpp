@@ -2,6 +2,7 @@
 
 #include "ducat/scanner.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdlib>
@@ -165,9 +166,63 @@ void test_bad_root()
 
 } // namespace
 
+// Builds `fanout` subdirectories per level, `depth` levels deep, each with a
+// few files of varying sizes.
+void make_wide_tree(const fs::path& dir, int depth, int fanout)
+{
+    for (int i = 0; i < 3; ++i)
+        write_file(dir / ("f" + std::to_string(i)), static_cast<std::size_t>(depth * 100 + i));
+    if (depth == 0)
+        return;
+    for (int i = 0; i < fanout; ++i) {
+        const fs::path sub = dir / ("d" + std::to_string(i));
+        fs::create_directory(sub);
+        make_wide_tree(sub, depth - 1, fanout);
+    }
+}
+
+void sort_tree(ducat::Node& node)
+{
+    std::sort(node.children.begin(), node.children.end(),
+              [](const ducat::Node& a, const ducat::Node& b) { return a.name < b.name; });
+    for (ducat::Node& child : node.children)
+        sort_tree(child);
+}
+
+// Counts nodes that differ between two trees sorted by name.
+std::size_t count_differences(const ducat::Node& a, const ducat::Node& b)
+{
+    if (a.name != b.name || a.size != b.size || a.disk != b.disk || a.is_dir != b.is_dir
+        || a.total_size != b.total_size || a.total_disk != b.total_disk || a.files != b.files
+        || a.dirs != b.dirs || a.children.size() != b.children.size())
+        return 1;
+    std::size_t differences = 0;
+    for (std::size_t i = 0; i < a.children.size(); ++i)
+        differences += count_differences(a.children[i], b.children[i]);
+    return differences;
+}
+
+void test_threads()
+{
+    TempDir temp;
+    make_wide_tree(temp.path(), 4, 5); // 781 directories, 2343 files
+
+    ducat::ScanResult single = ducat::scan_tree(temp.path().string(), {false, 1});
+    CHECK_EQ(single.root.dirs, 780u);
+    CHECK_EQ(single.root.files, 2343u);
+    sort_tree(single.root);
+    for (const unsigned threads : {2u, 8u, 32u}) {
+        ducat::ScanResult multi = ducat::scan_tree(temp.path().string(), {false, threads});
+        sort_tree(multi.root);
+        CHECK_EQ(count_differences(single.root, multi.root), 0u);
+        CHECK(multi.errors.empty());
+    }
+}
+
 int main()
 {
     test_tree();
     test_bad_root();
+    test_threads();
     return check::result();
 }

@@ -1,13 +1,22 @@
 #include "ducat/scanner.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <cerrno>
+#include <condition_variable>
 #include <cstring>
+#include <deque>
+#include <exception>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <system_error>
+#include <thread>
 #include <unordered_set>
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -31,14 +40,51 @@ struct InodeKeyHash {
 
 constexpr int dir_open_flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC;
 
+// Directories are open while their subdirectories wait in the queue, so
+// allow as many open files as the hard limit permits.
+void raise_open_file_limit()
+{
+    static std::once_flag once;
+    std::call_once(once, [] {
+        rlimit limit;
+        if (getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur < limit.rlim_max) {
+            limit.rlim_cur = limit.rlim_max;
+            setrlimit(RLIMIT_NOFILE, &limit);
+        }
+    });
+}
+
+std::string join(const std::string& path, std::string_view name)
+{
+    std::string result = path;
+    if (result.empty() || result.back() != '/')
+        result += '/';
+    result += name;
+    return result;
+}
+
+// A directory to scan or being scanned.
+struct DirTask {
+    Node* node;                        // filled by the task that reads the directory
+    DirTask* parent;                   // null for the root
+    std::string path;                  // for error messages
+    std::shared_ptr<DIR> parent_dir;   // open parent, released once this one is open
+    int fd = -1;                       // the root only: already open
+    // Subdirectories not finished yet; the last one to finish completes this
+    // directory.
+    std::atomic<std::size_t> pending = 0;
+};
+
+// Scans a tree with a fixed pool of threads that take directories from a
+// shared stack. A directory is complete when it has been read and all its
+// subdirectories are complete; then its totals are summed and its parent is
+// told. The scan ends when the stack is empty and no thread is busy.
 class Scanner {
 public:
-    Scanner(const ScanOptions& options, ScanResult& result)
-        : options_(options), result_(result)
+    Scanner(const ScanOptions& options, ScanResult& result, dev_t root_dev)
+        : options_(options), result_(result), root_dev_(root_dev)
     {
     }
-
-    void set_root_dev(dev_t dev) { root_dev_ = dev; }
 
     // Fills `node` from the stat data; also used for the root.
     void init_node(Node& node, const struct stat& st)
@@ -48,31 +94,100 @@ public:
         node.modified = st.st_mtim.tv_sec;
         node.is_dir = S_ISDIR(st.st_mode);
 
-        const bool duplicate = !node.is_dir && st.st_nlink > 1
-            && !seen_links_.insert({st.st_dev, st.st_ino}).second;
+        bool duplicate = false;
+        if (!node.is_dir && st.st_nlink > 1) {
+            const std::lock_guard lock(links_mutex_);
+            duplicate = !seen_links_.insert({st.st_dev, st.st_ino}).second;
+        }
         node.total_size = duplicate ? 0 : node.size;
         node.total_disk = duplicate ? 0 : node.disk;
     }
 
-    // Reads the directory open as `dir_fd` into `node` and descends into
-    // its subdirectories. Takes ownership of `dir_fd`.
-    void scan_dir(int dir_fd, Node& node, std::string& path)
+    // Scans the root directory, open as `fd`, with `threads` threads
+    // including the calling one. Takes ownership of `fd`.
+    void run(int fd, unsigned threads)
     {
-        DIR* dir = fdopendir(dir_fd);
-        if (!dir) {
-            add_error(path, errno);
-            close(dir_fd);
-            return;
+        DirTask& root = tasks_.emplace_back();
+        root.node = &result_.root;
+        root.parent = nullptr;
+        root.path = result_.root.name;
+        root.fd = fd;
+        stack_.push_back(&root);
+
+        std::vector<std::jthread> workers;
+        for (unsigned i = 1; i < threads; ++i)
+            workers.emplace_back([this] { work(); });
+        work();
+        workers.clear(); // joins
+
+        if (failure_)
+            std::rethrow_exception(failure_);
+    }
+
+private:
+    void work()
+    {
+        std::unique_lock lock(mutex_);
+        for (;;) {
+            wake_.wait(lock, [this] { return !stack_.empty() || busy_ == 0 || failure_; });
+            if (failure_ || stack_.empty())
+                break; // busy_ == 0: nothing left that could add work
+            DirTask* task = stack_.back();
+            stack_.pop_back();
+            ++busy_;
+            lock.unlock();
+
+            try {
+                scan(*task);
+            } catch (...) {
+                lock.lock();
+                if (!failure_)
+                    failure_ = std::current_exception();
+                --busy_;
+                break;
+            }
+
+            lock.lock();
+            --busy_;
+            if (busy_ == 0 && stack_.empty())
+                break;
+        }
+        wake_.notify_all();
+    }
+
+    // Reads one directory and queues its subdirectories.
+    void scan(DirTask& task)
+    {
+        int fd = task.fd;
+        if (fd < 0) {
+            fd = openat(dirfd(task.parent_dir.get()), task.node->name.c_str(),
+                        dir_open_flags | O_NOFOLLOW);
+            task.parent_dir.reset();
+            if (fd < 0) {
+                add_error(task.path, errno);
+                complete(&task);
+                return;
+            }
         }
 
+        DIR* const raw_dir = fdopendir(fd);
+        if (!raw_dir) {
+            add_error(task.path, errno);
+            close(fd);
+            complete(&task);
+            return;
+        }
+        const std::shared_ptr<DIR> dir(raw_dir, closedir);
+
+        Node& node = *task.node;
         // Directories to descend into, as indices into node.children.
         std::vector<std::size_t> subdirs;
         for (;;) {
             errno = 0;
-            const dirent* entry = readdir(dir);
+            const dirent* entry = readdir(dir.get());
             if (!entry) {
                 if (errno != 0)
-                    add_error(path, errno);
+                    add_error(task.path, errno);
                 break;
             }
             const char* name = entry->d_name;
@@ -80,8 +195,8 @@ public:
                 continue;
 
             struct stat st;
-            if (fstatat(dir_fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
-                add_error(join(path, name), errno);
+            if (fstatat(fd, name, &st, AT_SYMLINK_NOFOLLOW) != 0) {
+                add_error(join(task.path, name), errno);
                 continue;
             }
 
@@ -92,59 +207,84 @@ public:
                 subdirs.push_back(node.children.size() - 1);
         }
 
-        // node.children no longer grows, so references to its elements stay valid.
-        const std::size_t path_len = path.size();
-        for (const std::size_t index : subdirs) {
-            Node& child = node.children[index];
-            append(path, child.name);
-            const int child_fd = openat(dir_fd, child.name.c_str(), dir_open_flags | O_NOFOLLOW);
-            if (child_fd < 0)
-                add_error(path, errno);
-            else
-                scan_dir(child_fd, child, path);
-            path.resize(path_len);
+        if (subdirs.empty()) {
+            complete(&task);
+            return;
         }
-        closedir(dir);
 
-        for (const Node& child : node.children) {
-            node.total_size += child.total_size;
-            node.total_disk += child.total_disk;
-            if (child.is_dir) {
-                node.dirs += 1 + child.dirs;
-                node.files += child.files;
-            } else {
-                node.files += 1;
+        // node.children no longer grows, so pointers to its elements stay
+        // valid. `pending` is set before any subdirectory can complete, and
+        // `task` must not be touched after the push, as it may be complete.
+        task.pending.store(subdirs.size(), std::memory_order_relaxed);
+        {
+            const std::lock_guard lock(mutex_);
+            for (auto it = subdirs.rbegin(); it != subdirs.rend(); ++it) {
+                Node& child = node.children[*it];
+                DirTask& child_task = tasks_.emplace_back();
+                child_task.node = &child;
+                child_task.parent = &task;
+                child_task.path = join(task.path, child.name);
+                child_task.parent_dir = dir;
+                stack_.push_back(&child_task);
             }
         }
+        wake_.notify_all();
     }
 
-private:
-    static void append(std::string& path, const std::string& name)
+    // Sums the totals of a directory whose subdirectories are all complete,
+    // then completes its parent when this was the parent's last one.
+    void complete(DirTask* task)
     {
-        if (path.empty() || path.back() != '/')
-            path += '/';
-        path += name;
-    }
-
-    static std::string join(const std::string& path, const char* name)
-    {
-        std::string result = path;
-        append(result, name);
-        return result;
+        while (task) {
+            Node& node = *task->node;
+            for (const Node& child : node.children) {
+                node.total_size += child.total_size;
+                node.total_disk += child.total_disk;
+                if (child.is_dir) {
+                    node.dirs += 1 + child.dirs;
+                    node.files += child.files;
+                } else {
+                    node.files += 1;
+                }
+            }
+            DirTask* parent = task->parent;
+            if (!parent || parent->pending.fetch_sub(1, std::memory_order_acq_rel) != 1)
+                return;
+            task = parent;
+        }
     }
 
     void add_error(const std::string& path, int error)
     {
+        const std::lock_guard lock(errors_mutex_);
         result_.errors.push_back({path, error});
     }
 
     const ScanOptions& options_;
     ScanResult& result_;
-    dev_t root_dev_ = 0;
+    const dev_t root_dev_;
+
+    std::mutex mutex_;                 // guards the fields below up to failure_
+    std::condition_variable wake_;
+    std::deque<DirTask> tasks_;        // all tasks; a deque keeps their addresses
+    std::vector<DirTask*> stack_;      // tasks waiting for a thread
+    unsigned busy_ = 0;                // threads scanning a directory
+    std::exception_ptr failure_;
+
+    std::mutex errors_mutex_;
+    std::mutex links_mutex_;
     std::unordered_set<InodeKey, InodeKeyHash> seen_links_;
 };
 
 } // namespace
+
+unsigned default_scan_threads()
+{
+    // Directory reads and stat calls mostly wait for the kernel or the disk,
+    // so more threads than cores help, up to a point.
+    const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
+    return std::min(32u, 2 * cores);
+}
 
 ScanResult scan_tree(const std::string& path, const ScanOptions& options)
 {
@@ -160,14 +300,15 @@ ScanResult scan_tree(const std::string& path, const ScanOptions& options)
         throw std::system_error(error, std::generic_category(), path);
     }
 
+    const unsigned threads = options.threads == 0 ? default_scan_threads() : options.threads;
+    if (threads > 1)
+        raise_open_file_limit();
+
     ScanResult result;
-    Scanner scanner(options, result);
-    scanner.set_root_dev(st.st_dev);
+    Scanner scanner(options, result, st.st_dev);
     result.root.name = path;
     scanner.init_node(result.root, st);
-
-    std::string current = path;
-    scanner.scan_dir(fd, result.root, current);
+    scanner.run(fd, threads);
     return result;
 }
 

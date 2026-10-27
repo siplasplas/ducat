@@ -31,7 +31,13 @@ struct Node {
 struct ScanOptions {
     // Do not descend into directories on other file systems (like `du -x`).
     bool one_file_system = false;
+    // Threads reading directories, including the calling one; 0 means
+    // default_scan_threads().
+    unsigned threads = 0;
 };
+
+// The default number of scan threads for this machine.
+unsigned default_scan_threads();
 
 struct ScanError {
     std::string path;
@@ -43,7 +49,10 @@ struct ScanResult {
     std::vector<ScanError> errors; // entries that could not be read
 };
 
-// Scans the directory tree at `path` into memory. Throws std::system_error
+// Scans the directory tree at `path` into memory, with several threads (see
+// ScanOptions::threads); the order of entries is as the directories list
+// them. With more than one thread, raises the soft limit of open files of
+// the process to its hard limit. Throws std::system_error
 // when `path` itself cannot be opened as a directory; problems below the
 // root are collected in ScanResult::errors and the scan continues.
 ScanResult scan_tree(const std::string& path, const ScanOptions& options = {});

@@ -11,7 +11,7 @@ refresh one branch of it and list directories from it.
 ## Usage
 
 ```sh
-ducat scan [-x] [-d FILE] PATH
+ducat scan [-x] [-j N] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ```
 
@@ -20,7 +20,9 @@ usage (`st_blocks * 512`), its logical size (`st_size`), the number of files
 and directories, and the entries of `PATH` sorted by disk usage. Symlinks are
 not followed (except `PATH` itself), and a file with several hard links is
 counted once. Directory sizes count their own size as well, as GNU `du` does.
-`-x` (`--one-file-system`) stays on the file system of `PATH`.
+`-x` (`--one-file-system`) stays on the file system of `PATH`. The scan runs
+on several threads, by default twice the number of logical cores but at most
+32; `-j N` (`--threads`) sets the number.
 
 A new scan of a stored `PATH` replaces the stored data. When `PATH` lies inside
 a stored tree, only that branch is scanned: its entry in the directory above

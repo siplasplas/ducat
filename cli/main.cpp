@@ -20,7 +20,7 @@ namespace {
 void print_usage(std::ostream& out)
 {
     out << "Usage: ducat [--help] [--version]\n"
-           "       ducat scan [-x] [-d FILE] PATH\n"
+           "       ducat scan [-x] [-j N] [-d FILE] PATH\n"
            "       ducat ls [-d FILE] [PATH]\n"
            "\n"
            "Fast disk usage catalog.\n"
@@ -37,7 +37,9 @@ void print_usage(std::ostream& out)
            "  -h, --help             Show this help and exit\n"
            "  -V, --version          Show version and exit\n"
            "  -d, --database FILE    Database file (default: ~/.cache/ducat/ducat.tkt)\n"
-           "  -x, --one-file-system  Do not descend into other file systems (scan)\n";
+           "  -x, --one-file-system  Do not descend into other file systems (scan)\n"
+           "  -j, --threads N        Scan with N threads (scan; default: "
+        << ducat::default_scan_threads() << ")\n";
 }
 
 std::string default_database()
@@ -99,17 +101,27 @@ void print_directory(const ducat::Node& dir, const std::string& extra)
 
 struct CommandLine {
     std::string database = default_database();
-    bool one_file_system = false;
+    ducat::ScanOptions scan;
     std::string path;
 };
 
-// Parses the options of a command; returns false after printing an error.
-bool parse_options(int argc, char* argv[], int first, bool allow_x, CommandLine& line)
+// Parses the options of a command; scan options only when `scan` is true.
+// Returns false after printing an error.
+bool parse_options(int argc, char* argv[], int first, bool scan, CommandLine& line)
 {
     for (int i = first; i < argc; ++i) {
         const std::string_view arg = argv[i];
-        if (allow_x && (arg == "-x" || arg == "--one-file-system")) {
-            line.one_file_system = true;
+        if (scan && (arg == "-x" || arg == "--one-file-system")) {
+            line.scan.one_file_system = true;
+        } else if (scan && (arg == "-j" || arg == "--threads")) {
+            const char* value = i + 1 < argc ? argv[++i] : "";
+            char* end = nullptr;
+            const unsigned long threads = std::strtoul(value, &end, 10);
+            if (*value == '\0' || *end != '\0' || threads == 0 || threads > 1024) {
+                std::cerr << "ducat: " << arg << " needs a number of threads from 1 to 1024\n";
+                return false;
+            }
+            line.scan.threads = static_cast<unsigned>(threads);
         } else if (arg == "-d" || arg == "--database") {
             if (i + 1 >= argc) {
                 std::cerr << "ducat: " << arg << " needs a FILE\n";
@@ -147,7 +159,7 @@ int run_scan(int argc, char* argv[], int first)
     const auto start = std::chrono::steady_clock::now();
     ducat::RefreshResult result;
     try {
-        result = ducat::refresh(db, line.path, {line.one_file_system});
+        result = ducat::refresh(db, line.path, line.scan);
     } catch (const std::system_error& e) {
         std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
         return 1;
