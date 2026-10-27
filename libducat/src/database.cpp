@@ -383,6 +383,28 @@ std::vector<std::string> Database::roots()
     return result;
 }
 
+bool Database::compact(bool force)
+{
+    bool needed = force;
+    if (!needed) {
+        const tkrzw::Status status = dbm_->ShouldBeRebuilt(&needed);
+        if (!status.IsOK())
+            fail(file_, "cannot check for rebuilding", status);
+    }
+    if (!needed)
+        return false;
+    const tkrzw::Status status = dbm_->Rebuild();
+    if (!status.IsOK())
+        fail(file_, "cannot rebuild", status);
+    return true;
+}
+
+std::uint64_t Database::file_size()
+{
+    const std::int64_t size = dbm_->GetFileSizeSimple();
+    return size < 0 ? 0 : static_cast<std::uint64_t>(size);
+}
+
 std::string default_database_path()
 {
     const char* cache = std::getenv("XDG_CACHE_HOME");
@@ -422,10 +444,12 @@ RefreshResult apply_refresh(Database& db, PreparedRefresh prepared)
             throw std::system_error(prepared.scan_error, std::generic_category(), prepared.root);
         db.remove(prepared.root, parent_own);
         result.removed = true;
-        return result;
+    } else {
+        db.store(*prepared.scan, parent_own);
+        result.scan = std::move(*prepared.scan);
     }
-    db.store(*prepared.scan, parent_own);
-    result.scan = std::move(*prepared.scan);
+    // Rebuilding /usr (870,000 entries) takes some 25 ms, so do it when due.
+    db.compact();
     return result;
 }
 

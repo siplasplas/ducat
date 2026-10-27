@@ -14,6 +14,7 @@ refresh one branch of it and list directories from it.
 ducat scan [-x] [-j N] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
+ducat compact [-d FILE]
 ```
 
 `scan` scans the tree at `PATH`, stores it in the database and prints its disk
@@ -39,6 +40,11 @@ to the current directory and must lie inside a scanned tree.
 
 `trees` lists the stored trees, that is the scanned directories not lying
 inside another stored tree, with their disk usage and size.
+
+The database file does not reuse the space of replaced records by itself, so
+`scan` (and the GUI) rebuilds it when the records take over twice the space
+they need; for a scan of `/usr` this takes some 25 ms. `compact` rebuilds it
+at once and prints the file size before and after.
 
 The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
 `-d FILE` (`--database`) selects another file.

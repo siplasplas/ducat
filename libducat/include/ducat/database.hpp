@@ -81,6 +81,16 @@ public:
     // directories whose parent is not stored.
     std::vector<std::string> roots();
 
+    // Rebuilds the file to give back the space of removed and rewritten
+    // records, which Tkrzw does not reuse, so the file grows with each scan
+    // stored again. Rebuilds always when `force`, otherwise only when Tkrzw
+    // judges it worthwhile (the records take over twice the space they
+    // need). Needs write mode. Returns whether the file was rebuilt.
+    bool compact(bool force = false);
+
+    // The size of the database file in bytes.
+    std::uint64_t file_size();
+
 private:
     struct Share;
 
@@ -122,7 +132,8 @@ struct RefreshResult {
 PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& options = {});
 
 // Stores a prepared scan, which brings a whole stored tree or one branch of
-// it up to date, or removes a root that no longer exists. Throws
+// it up to date, or removes a root that no longer exists, then compacts the
+// database when due (see Database::compact). Throws
 // std::system_error with scan_error when that root is not stored either.
 RefreshResult apply_refresh(Database& db, PreparedRefresh prepared);
 

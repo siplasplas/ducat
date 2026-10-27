@@ -289,6 +289,43 @@ void test_roots()
     CHECK(db.roots() == std::vector<std::string>{"/"});
 }
 
+void test_compact()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    for (int i = 0; i < 2000; ++i)
+        write_file(root / "big" / ("g" + std::to_string(i)), 1);
+    const std::string compacted = (temp.path() / "compacted.tkt").string();
+    const std::string plain = (temp.path() / "plain.tkt").string();
+
+    // Tkrzw writes on close, so the file changes from one session to the
+    // next, as with separate runs of "ducat scan". refresh compacts when due;
+    // store alone never does.
+    for (int i = 0; i < 5; ++i) {
+        ducat::Database db(compacted, ducat::Database::Mode::write);
+        ducat::refresh(db, root.string());
+        db.close();
+        ducat::Database other(plain, ducat::Database::Mode::write);
+        other.store(ducat::scan_tree(root.string()));
+        other.close();
+    }
+    CHECK(fs::file_size(compacted) < fs::file_size(plain));
+
+    const std::uintmax_t before = fs::file_size(plain);
+    {
+        ducat::Database db(plain, ducat::Database::Mode::write);
+        CHECK(db.compact(true));
+        db.close();
+    }
+    CHECK(fs::file_size(plain) < before);
+
+    for (const std::string& file : {compacted, plain}) {
+        ducat::Database db(file, ducat::Database::Mode::read);
+        check_matches_full_scan(db, root);
+    }
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -310,6 +347,7 @@ int main()
     test_rescan_and_remove();
     test_refresh_branch();
     test_roots();
+    test_compact();
     test_open_errors();
     return check::result();
 }

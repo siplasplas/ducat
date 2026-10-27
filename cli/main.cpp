@@ -24,6 +24,7 @@ void print_usage(std::ostream& out)
            "       ducat scan [-x] [-j N] [-d FILE] PATH\n"
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
+           "       ducat compact [-d FILE]\n"
            "\n"
            "Fast disk usage catalog.\n"
            "\n"
@@ -35,6 +36,8 @@ void print_usage(std::ostream& out)
            "  ls [PATH]      Print a directory from the database, like scan does;\n"
            "                 PATH defaults to the current directory\n"
            "  trees          List the stored trees with their disk usage\n"
+           "  compact        Rebuild the database file to give back unused space;\n"
+           "                 scan does this by itself when the file has grown much\n"
            "\n"
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
@@ -196,6 +199,31 @@ int run_trees(int argc, char* argv[], int first)
     return 0;
 }
 
+int run_compact(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, false, line))
+        return 2;
+    if (!line.path.empty()) {
+        std::cerr << "ducat: compact takes no PATH\n";
+        return 2;
+    }
+
+    // Write mode creates a missing file; do not leave an empty one behind.
+    if (!std::filesystem::exists(line.database)) {
+        std::cerr << "ducat: " << line.database << ": no such database\n";
+        return 1;
+    }
+    ducat::Database db(line.database, ducat::Database::Mode::write);
+    const std::uint64_t before = db.file_size();
+    db.compact(true);
+    const std::uint64_t after = db.file_size();
+    db.close();
+    std::printf("%s: %s -> %s\n", line.database.c_str(), ducat::format_size(before).c_str(),
+                ducat::format_size(after).c_str());
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -222,6 +250,8 @@ int main(int argc, char* argv[])
             return run_ls(argc, argv, 2);
         if (arg == "trees")
             return run_trees(argc, argv, 2);
+        if (arg == "compact")
+            return run_compact(argc, argv, 2);
     } catch (const ducat::DatabaseError& e) {
         std::cerr << "ducat: " << e.what() << '\n';
         return 1;
