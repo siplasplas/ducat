@@ -1,10 +1,14 @@
+#include "ducat/database.hpp"
+#include "ducat/path.hpp"
 #include "ducat/scanner.hpp"
 #include "ducat/version.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -16,18 +20,35 @@ namespace {
 void print_usage(std::ostream& out)
 {
     out << "Usage: ducat [--help] [--version]\n"
-           "       ducat scan [-x] PATH\n"
+           "       ducat scan [-x] [-d FILE] PATH\n"
+           "       ducat ls [-d FILE] [PATH]\n"
            "\n"
            "Fast disk usage catalog.\n"
            "\n"
            "Commands:\n"
-           "  scan PATH      Scan the directory tree at PATH and print its totals\n"
-           "                 and its entries sorted by disk usage\n"
+           "  scan PATH      Scan the directory tree at PATH, store it in the database\n"
+           "                 and print its totals and entries sorted by disk usage\n"
+           "  ls [PATH]      Print a directory from the database, like scan does;\n"
+           "                 PATH defaults to the current directory\n"
            "\n"
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
            "  -V, --version          Show version and exit\n"
+           "  -d, --database FILE    Database file (default: ~/.cache/ducat/ducat.tkt)\n"
            "  -x, --one-file-system  Do not descend into other file systems (scan)\n";
+}
+
+std::string default_database()
+{
+    const char* cache = std::getenv("XDG_CACHE_HOME");
+    std::filesystem::path dir;
+    if (cache && *cache) {
+        dir = cache;
+    } else {
+        const char* home = std::getenv("HOME");
+        dir = std::filesystem::path(home ? home : ".") / ".cache";
+    }
+    return (dir / "ducat" / "ducat.tkt").string();
 }
 
 // Formats a byte count with binary units, e.g. "1.5 GiB".
@@ -47,18 +68,19 @@ std::string format_size(std::uint64_t bytes)
     return buffer;
 }
 
-void print_scan(const ducat::ScanResult& result, double seconds)
+// Prints a directory's totals, `extra` appended to them, and its entries
+// sorted by disk usage.
+void print_directory(const ducat::Node& dir, const std::string& extra)
 {
-    const ducat::Node& root = result.root;
-    std::printf("%s\n", root.name.c_str());
-    std::printf("  disk %s, size %s, %llu files, %llu dirs, %zu errors, %.2f s\n\n",
-                format_size(root.total_disk).c_str(), format_size(root.total_size).c_str(),
-                static_cast<unsigned long long>(root.files),
-                static_cast<unsigned long long>(root.dirs), result.errors.size(), seconds);
+    std::printf("%s\n", dir.name.c_str());
+    std::printf("  disk %s, size %s, %llu files, %llu dirs%s\n\n",
+                format_size(dir.total_disk).c_str(), format_size(dir.total_size).c_str(),
+                static_cast<unsigned long long>(dir.files),
+                static_cast<unsigned long long>(dir.dirs), extra.c_str());
 
     std::vector<const ducat::Node*> entries;
-    entries.reserve(root.children.size());
-    for (const ducat::Node& child : root.children)
+    entries.reserve(dir.children.size());
+    for (const ducat::Node& child : dir.children)
         entries.push_back(&child);
     std::sort(entries.begin(), entries.end(), [](const ducat::Node* a, const ducat::Node* b) {
         if (a->total_disk != b->total_disk)
@@ -73,25 +95,44 @@ void print_scan(const ducat::ScanResult& result, double seconds)
                     entry->is_dir ? "/" : "");
 }
 
-int run_scan(int argc, char* argv[], int first)
-{
-    ducat::ScanOptions options;
+struct CommandLine {
+    std::string database = default_database();
+    bool one_file_system = false;
     std::string path;
+};
+
+// Parses the options of a command; returns false after printing an error.
+bool parse_options(int argc, char* argv[], int first, bool allow_x, CommandLine& line)
+{
     for (int i = first; i < argc; ++i) {
         const std::string_view arg = argv[i];
-        if (arg == "-x" || arg == "--one-file-system") {
-            options.one_file_system = true;
+        if (allow_x && (arg == "-x" || arg == "--one-file-system")) {
+            line.one_file_system = true;
+        } else if (arg == "-d" || arg == "--database") {
+            if (i + 1 >= argc) {
+                std::cerr << "ducat: " << arg << " needs a FILE\n";
+                return false;
+            }
+            line.database = argv[++i];
         } else if (arg.starts_with('-') && arg != "-") {
             std::cerr << "ducat: unknown option '" << arg << "'\n";
-            return 2;
-        } else if (path.empty()) {
-            path = arg;
+            return false;
+        } else if (line.path.empty()) {
+            line.path = arg;
         } else {
-            std::cerr << "ducat: scan takes one PATH\n";
-            return 2;
+            std::cerr << "ducat: only one PATH is allowed\n";
+            return false;
         }
     }
-    if (path.empty()) {
+    return true;
+}
+
+int run_scan(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, true, line))
+        return 2;
+    if (line.path.empty()) {
         std::cerr << "ducat: scan needs a PATH\n";
         return 2;
     }
@@ -99,17 +140,47 @@ int run_scan(int argc, char* argv[], int first)
     const auto start = std::chrono::steady_clock::now();
     ducat::ScanResult result;
     try {
-        result = ducat::scan_tree(path, options);
+        result = ducat::scan_tree(ducat::resolve_path(line.path), {line.one_file_system});
     } catch (const std::system_error& e) {
-        std::cerr << "ducat: " << path << ": " << std::strerror(e.code().value()) << '\n';
+        std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
         return 1;
     }
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    const std::chrono::duration<double> scanned = std::chrono::steady_clock::now() - start;
 
     for (const ducat::ScanError& error : result.errors)
         std::cerr << "ducat: " << error.path << ": " << std::strerror(error.error) << '\n';
-    print_scan(result, elapsed.count());
+
+    std::error_code ignored;
+    std::filesystem::create_directories(std::filesystem::path(line.database).parent_path(),
+                                        ignored);
+    ducat::Database db(line.database, ducat::Database::Mode::write);
+    db.store(result);
+    db.close();
+    const std::chrono::duration<double> stored =
+        std::chrono::steady_clock::now() - start - scanned;
+
+    char extra[96];
+    std::snprintf(extra, sizeof extra, ", %zu errors, scan %.2f s, store %.2f s",
+                  result.errors.size(), scanned.count(), stored.count());
+    print_directory(result.root, extra);
     return result.errors.empty() ? 0 : 1;
+}
+
+int run_ls(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, false, line))
+        return 2;
+    const std::string path = ducat::resolve_path(line.path.empty() ? "." : line.path);
+
+    ducat::Database db(line.database, ducat::Database::Mode::read);
+    const std::optional<ducat::Node> dir = db.load_directory(path);
+    if (!dir) {
+        std::cerr << "ducat: " << path << ": not in the database " << line.database << '\n';
+        return 1;
+    }
+    print_directory(*dir, "");
+    return 0;
 }
 
 } // namespace
@@ -130,8 +201,16 @@ int main(int argc, char* argv[])
         std::cout << "ducat " << ducat::version() << '\n';
         return 0;
     }
-    if (arg == "scan")
-        return run_scan(argc, argv, 2);
+
+    try {
+        if (arg == "scan")
+            return run_scan(argc, argv, 2);
+        if (arg == "ls")
+            return run_ls(argc, argv, 2);
+    } catch (const ducat::DatabaseError& e) {
+        std::cerr << "ducat: " << e.what() << '\n';
+        return 1;
+    }
 
     std::cerr << "ducat: unknown command or option '" << arg << "'\n";
     print_usage(std::cerr);

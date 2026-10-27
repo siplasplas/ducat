@@ -1,6 +1,8 @@
 configure_file(src/config.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/config.hpp" @ONLY)
 
 add_library(libducat
+    src/database.cpp
+    src/path.cpp
     src/record.cpp
     src/scanner.cpp
     src/version.cpp
@@ -17,5 +19,7 @@ target_include_directories(libducat
     PUBLIC  "${CMAKE_CURRENT_SOURCE_DIR}/include"
     PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated"
 )
+
+target_link_libraries(libducat PRIVATE ducat_tkrzw)
 
 target_compile_options(libducat PRIVATE -Wall -Wextra -Wpedantic)
