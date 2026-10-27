@@ -27,7 +27,9 @@ void print_usage(std::ostream& out)
            "\n"
            "Commands:\n"
            "  scan PATH      Scan the directory tree at PATH, store it in the database\n"
-           "                 and print its totals and entries sorted by disk usage\n"
+           "                 and print its totals and entries sorted by disk usage;\n"
+           "                 inside a stored tree this refreshes just that branch,\n"
+           "                 and a PATH that no longer exists is removed\n"
            "  ls [PATH]      Print a directory from the database, like scan does;\n"
            "                 PATH defaults to the current directory\n"
            "\n"
@@ -137,33 +139,37 @@ int run_scan(int argc, char* argv[], int first)
         return 2;
     }
 
-    const auto start = std::chrono::steady_clock::now();
-    ducat::ScanResult result;
-    try {
-        result = ducat::scan_tree(ducat::resolve_path(line.path), {line.one_file_system});
-    } catch (const std::system_error& e) {
-        std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
-        return 1;
-    }
-    const std::chrono::duration<double> scanned = std::chrono::steady_clock::now() - start;
-
-    for (const ducat::ScanError& error : result.errors)
-        std::cerr << "ducat: " << error.path << ": " << std::strerror(error.error) << '\n';
-
     std::error_code ignored;
     std::filesystem::create_directories(std::filesystem::path(line.database).parent_path(),
                                         ignored);
     ducat::Database db(line.database, ducat::Database::Mode::write);
-    db.store(result);
-    db.close();
-    const std::chrono::duration<double> stored =
-        std::chrono::steady_clock::now() - start - scanned;
 
-    char extra[96];
-    std::snprintf(extra, sizeof extra, ", %zu errors, scan %.2f s, store %.2f s",
-                  result.errors.size(), scanned.count(), stored.count());
-    print_directory(result.root, extra);
-    return result.errors.empty() ? 0 : 1;
+    const auto start = std::chrono::steady_clock::now();
+    ducat::RefreshResult result;
+    try {
+        result = ducat::refresh(db, line.path, {line.one_file_system});
+    } catch (const std::system_error& e) {
+        std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
+        return 1;
+    }
+    db.close();
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+
+    if (result.removed) {
+        std::printf("%s: no longer exists, removed from the database\n",
+                    ducat::resolve_path(line.path).c_str());
+        return 0;
+    }
+
+    const ducat::ScanResult& scan = result.scan;
+    for (const ducat::ScanError& error : scan.errors)
+        std::cerr << "ducat: " << error.path << ": " << std::strerror(error.error) << '\n';
+
+    char extra[64];
+    std::snprintf(extra, sizeof extra, ", %zu errors, %.2f s", scan.errors.size(),
+                  elapsed.count());
+    print_directory(scan.root, extra);
+    return scan.errors.empty() ? 0 : 1;
 }
 
 int run_ls(int argc, char* argv[], int first)

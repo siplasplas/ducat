@@ -42,11 +42,22 @@ private:
     fs::path path_;
 };
 
-bool same_fields(const ducat::Node& a, const ducat::Node& b)
+// Checks the fields of two nodes, except children; `where` names them in
+// failure messages.
+void check_same(const ducat::Node& a, const ducat::Node& b, const std::string& where)
 {
-    return a.name == b.name && a.size == b.size && a.disk == b.disk && a.modified == b.modified
-        && a.is_dir == b.is_dir && a.total_size == b.total_size && a.total_disk == b.total_disk
-        && a.files == b.files && a.dirs == b.dirs;
+    const int failures = check::failures;
+    CHECK_EQ(a.name, b.name);
+    CHECK_EQ(a.size, b.size);
+    CHECK_EQ(a.disk, b.disk);
+    CHECK_EQ(a.modified, b.modified);
+    CHECK_EQ(a.is_dir, b.is_dir);
+    CHECK_EQ(a.total_size, b.total_size);
+    CHECK_EQ(a.total_disk, b.total_disk);
+    CHECK_EQ(a.files, b.files);
+    CHECK_EQ(a.dirs, b.dirs);
+    if (check::failures != failures)
+        std::cerr << "    in: " << where << '\n';
 }
 
 const ducat::Node* find_child(const ducat::Node& node, const std::string& name)
@@ -67,11 +78,13 @@ void check_stored(ducat::Database& db, const ducat::Node& node, const std::strin
     CHECK_EQ(stored->name, path);
     ducat::Node expected = node;
     expected.name = path;
-    CHECK(same_fields(*stored, expected));
+    check_same(*stored, expected, path);
     CHECK_EQ(stored->children.size(), node.children.size());
     for (const ducat::Node& child : node.children) {
         const ducat::Node* stored_child = find_child(*stored, child.name);
-        CHECK(stored_child && same_fields(*stored_child, child));
+        CHECK(stored_child);
+        if (stored_child)
+            check_same(*stored_child, child, path + " entry " + child.name);
         if (child.is_dir)
             check_stored(db, child, ducat::join_path(path, child.name));
     }
@@ -161,6 +174,85 @@ void test_rescan_and_remove()
     CHECK(!db.read_directory((root / "sub-2").string()));
 }
 
+// Checks that the whole stored tree at `root` matches a fresh full scan.
+void check_matches_full_scan(ducat::Database& db, const fs::path& root)
+{
+    check_stored(db, ducat::scan_tree(root.string()).root, root.string());
+}
+
+int refresh_error(ducat::Database& db, const fs::path& path)
+{
+    try {
+        ducat::refresh(db, path.string());
+    } catch (const std::system_error& e) {
+        return e.code().value();
+    }
+    return 0;
+}
+
+void test_refresh_branch()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    fs::create_directories(root / "big" / "zz" / "inner");
+    write_file(root / "big" / "zz" / "inner" / "x", 10);
+    const std::string db_file = (temp.path() / "test.tkt").string();
+
+    ducat::Database db(db_file, ducat::Database::Mode::write);
+    ducat::refresh(db, root.string());
+    check_matches_full_scan(db, root);
+
+    // A change deep in the tree.
+    write_file(root / "sub" / "deep" / "new", 5000);
+    ducat::refresh(db, (root / "sub" / "deep").string());
+    check_matches_full_scan(db, root);
+
+    // "big/zz" lies in an extra segment of "big", which is above the parent.
+    write_file(root / "big" / "zz" / "inner" / "y", 12345);
+    ducat::refresh(db, (root / "big" / "zz" / "inner").string());
+    check_matches_full_scan(db, root);
+
+    // A new directory; its parent's own size and time change too.
+    fs::create_directory(root / "sub" / "added");
+    write_file(root / "sub" / "added" / "f", 777);
+    ducat::refresh(db, (root / "sub" / "added").string());
+    check_matches_full_scan(db, root);
+
+    // A removed directory.
+    fs::remove_all(root / "sub-2");
+    CHECK(ducat::refresh(db, (root / "sub-2").string()).removed);
+    check_matches_full_scan(db, root);
+    CHECK(!db.read_directory((root / "sub-2").string()));
+
+    // New entries add a segment to the parent, removed ones drop it again.
+    const std::string big = (root / "big").string();
+    for (int i = 0; i < 30; ++i) {
+        const fs::path dir = root / "big" / ("d" + std::to_string(i));
+        fs::create_directory(dir);
+        CHECK(!ducat::refresh(db, dir.string()).removed);
+    }
+    check_matches_full_scan(db, root);
+    const std::optional<ducat::record::DirectoryRecord> grown = db.read_directory(big);
+    CHECK(grown && grown->entry_count == 101 && grown->segment_count == 3);
+
+    for (int i = 0; i < 30; ++i) {
+        const fs::path dir = root / "big" / ("d" + std::to_string(i));
+        fs::remove(dir);
+        CHECK(ducat::refresh(db, dir.string()).removed);
+    }
+    check_matches_full_scan(db, root);
+    const std::optional<ducat::record::DirectoryRecord> shrunk = db.read_directory(big);
+    CHECK(shrunk && shrunk->entry_count == 71 && shrunk->segment_count == 2);
+    std::vector<ducat::Node> entries;
+    CHECK(!db.read_segment(big, 3, entries));
+
+    // A missing path that is not stored is an error and changes nothing.
+    CHECK_EQ(refresh_error(db, root / "never-stored"), ENOENT);
+    db.remove((root / "never-stored").string());
+    check_matches_full_scan(db, root);
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -180,6 +272,7 @@ int main()
 {
     test_store_and_load();
     test_rescan_and_remove();
+    test_refresh_branch();
     test_open_errors();
     return check::result();
 }

@@ -171,4 +171,21 @@ ScanResult scan_tree(const std::string& path, const ScanOptions& options)
     return result;
 }
 
+std::optional<Node> stat_directory(const std::string& path)
+{
+    struct stat st;
+    if (stat(path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+        return std::nullopt;
+
+    Node node;
+    node.name = path;
+    node.size = static_cast<std::uint64_t>(st.st_size);
+    node.disk = static_cast<std::uint64_t>(st.st_blocks) * 512;
+    node.modified = st.st_mtim.tv_sec;
+    node.is_dir = true;
+    node.total_size = node.size;
+    node.total_disk = node.disk;
+    return node;
+}
+
 } // namespace ducat

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,5 +47,10 @@ struct ScanResult {
 // when `path` itself cannot be opened as a directory; problems below the
 // root are collected in ScanResult::errors and the scan continues.
 ScanResult scan_tree(const std::string& path, const ScanOptions& options = {});
+
+// Reads the own data of the directory at `path` (followed if a symlink),
+// without its entries. Returns nullopt when it cannot be read or is not a
+// directory.
+std::optional<Node> stat_directory(const std::string& path);
 
 } // namespace ducat

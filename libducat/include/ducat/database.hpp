@@ -40,12 +40,24 @@ public:
     void close();
 
     // Stores a scanned tree under the normalized path of its root, replacing
-    // the records of an earlier scan of that tree. The records of the
-    // directories above the root are not updated.
-    void store(const ScanResult& scan);
+    // the records of an earlier scan of that tree. When the directory above
+    // the root is stored too, the root's entry there is replaced or added and
+    // the totals of all stored directories above are updated, so a branch of
+    // a stored tree can be refreshed by scanning just that branch. Hard links
+    // are then counted once within the branch only.
+    //
+    // `parent`, when given, holds fresh own data of the directory above the
+    // root (see stat_directory), which an added or removed entry changes;
+    // it replaces the stored size, disk usage and time of that directory.
+    void store(const ScanResult& scan, const Node* parent = nullptr);
+
+    // Removes a directory that no longer exists: its records and those below
+    // it, its entry in the stored directory above, and its share of the
+    // totals of all stored directories above. `parent` is as for store.
+    void remove(std::string_view path, const Node* parent = nullptr);
 
     // Removes the records of the directory at `path` and of all directories
-    // below it.
+    // below it, without touching the directories above.
     void remove_tree(std::string_view path);
 
     // Reads the main record of a directory: its data, entry and segment
@@ -62,12 +74,31 @@ public:
     std::optional<Node> load_directory(std::string_view path);
 
 private:
+    struct Share;
+
     void store_directory(const Node& dir, const std::string& path);
+    void write_directory(const Node& dir, const std::string& path,
+                         std::uint64_t old_segment_count);
+    void replace_entry(const std::string& path, const Node* entry, const Node* parent_own);
+    void add_to_ancestors(std::string path, const Share& added, const Share& removed,
+                          const Node* own);
     void remove_prefix(std::string_view prefix);
     void set(std::string_view key, std::string_view value);
 
     std::string file_;
     std::unique_ptr<tkrzw::TreeDBM> dbm_;
 };
+
+struct RefreshResult {
+    ScanResult scan;               // empty when the tree was removed
+    bool removed = false;          // the path no longer exists and was removed
+};
+
+// Scans the tree at `path` (resolved with resolve_path) and stores it, with
+// fresh own data of the directory above it, so that a whole stored tree or
+// one branch of it is brought up to date. When `path` no longer exists but
+// is stored, removes it from the database instead. Throws std::system_error
+// when `path` cannot be scanned otherwise.
+RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options = {});
 
 } // namespace ducat

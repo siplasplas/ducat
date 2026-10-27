@@ -5,9 +5,8 @@ A fast disk usage analyzer in the spirit of `du`, `duc` and `ncdu` for Linux.
 The core logic lives in the `libducat` library; the command-line tool and the
 planned GUI are thin frontends over it.
 
-Work in progress: the tool can scan a directory tree, store it in a database
-and list directories from it. Refreshing one branch of a stored tree is not
-implemented yet.
+Work in progress: the tool can scan a directory tree, store it in a database,
+refresh one branch of it and list directories from it.
 
 ## Usage
 
@@ -21,9 +20,13 @@ usage (`st_blocks * 512`), its logical size (`st_size`), the number of files
 and directories, and the entries of `PATH` sorted by disk usage. Symlinks are
 not followed (except `PATH` itself), and a file with several hard links is
 counted once. Directory sizes count their own size as well, as GNU `du` does.
-`-x` (`--one-file-system`) stays on the file system of `PATH`. A new scan of
-the same `PATH` replaces the stored one; the stored directories above `PATH`
-keep their old totals for now.
+`-x` (`--one-file-system`) stays on the file system of `PATH`.
+
+A new scan of a stored `PATH` replaces the stored data. When `PATH` lies inside
+a stored tree, only that branch is scanned: its entry in the directory above
+and the totals of all stored directories above are updated. A `PATH` that no
+longer exists is removed from the database the same way. Hard links are then
+counted once within the rescanned branch only.
 
 Entries that cannot be read are reported on standard error and the scan goes
 on; the exit status is then 1.

@@ -58,6 +58,12 @@ struct DirectoryRecord {
     std::uint64_t segment_count = 0;
 };
 
+// Encode one record of a directory whose entries are already split into
+// pages, e.g. after changing one entry of a decoded record; the entries are
+// written in the given order, which must be sorted by name.
+std::string encode_main(const DirectoryRecord& record);
+std::string encode_segment(const std::vector<Node>& entries);
+
 // Decoders return nullopt or false when the data is malformed.
 std::optional<DirectoryRecord> decode_directory(std::string_view data);
 

@@ -37,12 +37,35 @@ void append_entry(std::string& out, const Node& node)
         append_totals(out, node);
 }
 
-void append_entries(std::string& out, const std::vector<const Node*>& entries, std::size_t begin,
-                    std::size_t end)
+template <typename Entries, typename Get>
+void append_entries(std::string& out, const Entries& entries, std::size_t begin, std::size_t end,
+                    Get get)
 {
     append_number(out, end - begin);
     for (std::size_t i = begin; i < end; ++i)
-        append_entry(out, *entries[i]);
+        append_entry(out, get(entries[i]));
+}
+
+const Node& deref(const Node* node)
+{
+    return *node;
+}
+
+const Node& self(const Node& node)
+{
+    return node;
+}
+
+void append_header(std::string& out, const Node& dir, std::uint64_t entry_count,
+                   std::uint64_t segment_count)
+{
+    out += static_cast<char>(format_version);
+    append_number(out, dir.size);
+    append_number(out, dir.disk >> disk_unit_shift);
+    append_number(out, varint::zigzag_encode(dir.modified));
+    append_totals(out, dir);
+    append_number(out, entry_count);
+    append_number(out, segment_count);
 }
 
 class Reader {
@@ -157,23 +180,31 @@ EncodedDirectory encode_directory(const Node& dir)
         (count - inline_count + entries_per_segment - 1) / entries_per_segment;
 
     EncodedDirectory result;
-    std::string& out = result.main;
-    out += static_cast<char>(format_version);
-    append_number(out, dir.size);
-    append_number(out, dir.disk >> disk_unit_shift);
-    append_number(out, varint::zigzag_encode(dir.modified));
-    append_totals(out, dir);
-    append_number(out, count);
-    append_number(out, segment_count);
-    append_entries(out, entries, 0, inline_count);
+    append_header(result.main, dir, count, segment_count);
+    append_entries(result.main, entries, 0, inline_count, deref);
 
     result.segments.resize(segment_count);
     for (std::size_t i = 0; i < segment_count; ++i) {
         const std::size_t begin = inline_count + i * entries_per_segment;
         append_entries(result.segments[i], entries, begin,
-                       std::min(count, begin + entries_per_segment));
+                       std::min(count, begin + entries_per_segment), deref);
     }
     return result;
+}
+
+std::string encode_main(const DirectoryRecord& record)
+{
+    std::string out;
+    append_header(out, record.dir, record.entry_count, record.segment_count);
+    append_entries(out, record.dir.children, 0, record.dir.children.size(), self);
+    return out;
+}
+
+std::string encode_segment(const std::vector<Node>& entries)
+{
+    std::string out;
+    append_entries(out, entries, 0, entries.size(), self);
+    return out;
 }
 
 std::optional<DirectoryRecord> decode_directory(std::string_view data)
