@@ -6,12 +6,17 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 
 class DirectoryModel;
+class SearchDialog;
+namespace ducat {
+class Database;
+}
 class QAction;
 class QLabel;
 class QLineEdit;
@@ -42,6 +47,18 @@ public:
     // stored tree or one branch of it. Does nothing while a scan runs.
     void start_scan(const std::string& path);
 
+    // Opens the database for reading and passes it to `use`. Returns false
+    // with a message in `error` when the database is being written or
+    // cannot be opened.
+    bool with_database(const std::function<void(ducat::Database&)>& use, QString& error);
+
+    // The shown directory, empty before the first one.
+    const std::string& current_directory() const { return current_; }
+
+    // Shows the directory `folder` with the entry `name` selected, and
+    // brings the window to the front.
+    void show_entry(const std::string& folder, const std::string& name);
+
 private:
     // The result of a background scan, passed back to the GUI thread.
     struct ScanOutcome {
@@ -59,6 +76,7 @@ private:
     void open_typed_path();
     void choose_and_scan();
     void fill_trees_menu();
+    void show_search();
     void update_progress();
     void finish_scan(const ScanOutcome& outcome);
     void show_error(const QString& message);
@@ -75,6 +93,7 @@ private:
     QAction* scan_action_;
     QAction* one_file_system_action_;
     QMenu* trees_menu_;
+    SearchDialog* search_dialog_ = nullptr; // created when first needed
     QLabel* progress_label_;
     QProgressBar* progress_bar_;
     QToolButton* cancel_button_;

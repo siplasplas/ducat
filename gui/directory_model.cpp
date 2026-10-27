@@ -25,21 +25,33 @@ void DirectoryModel::set_directory(ducat::Node dir)
 {
     beginResetModel();
     total_disk_ = dir.total_disk;
-    entries_ = std::move(dir.children);
-    sort_entries();
+    rows_.clear();
+    rows_.reserve(dir.children.size());
+    for (ducat::Node& child : dir.children)
+        rows_.push_back({std::move(child), dir.name});
+    sort_rows();
+    endResetModel();
+}
+
+void DirectoryModel::set_rows(std::vector<Row> rows)
+{
+    beginResetModel();
+    total_disk_ = 0;
+    rows_ = std::move(rows);
+    sort_rows();
     endResetModel();
 }
 
 int DirectoryModel::row_of(const std::string& name) const
 {
-    const auto it = std::find_if(entries_.begin(), entries_.end(),
-                                 [&](const ducat::Node& entry) { return entry.name == name; });
-    return it == entries_.end() ? -1 : static_cast<int>(it - entries_.begin());
+    const auto it = std::find_if(rows_.begin(), rows_.end(),
+                                 [&](const Row& row) { return row.entry.name == name; });
+    return it == rows_.end() ? -1 : static_cast<int>(it - rows_.begin());
 }
 
 int DirectoryModel::rowCount(const QModelIndex& parent) const
 {
-    return parent.isValid() ? 0 : static_cast<int>(entries_.size());
+    return parent.isValid() ? 0 : static_cast<int>(rows_.size());
 }
 
 int DirectoryModel::columnCount(const QModelIndex& parent) const
@@ -73,6 +85,7 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         case Modified:
             return QLocale().toString(QDateTime::fromSecsSinceEpoch(entry.modified),
                                       QLocale::ShortFormat);
+        case Folder: return QString::fromStdString(folder(index.row()));
         }
         break;
     case Qt::ToolTipRole:
@@ -82,6 +95,8 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
             const std::uint64_t bytes = column == Disk ? entry.total_disk : entry.total_size;
             return tr("%1 bytes").arg(QLocale().toString(qulonglong(bytes)));
         }
+        if (column == Folder)
+            return QString::fromStdString(folder(index.row()));
         break;
     case Qt::DecorationRole:
         if (column == Name)
@@ -89,7 +104,7 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
                                                                     : QStyle::SP_FileIcon);
         break;
     case Qt::TextAlignmentRole:
-        if (column != Name)
+        if (column != Name && column != Folder)
             return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
         break;
     }
@@ -108,6 +123,7 @@ QVariant DirectoryModel::headerData(int section, Qt::Orientation orientation, in
     case Files: return tr("Files");
     case Folders: return tr("Folders");
     case Modified: return tr("Modified");
+    case Folder: return tr("Folder");
     }
     return {};
 }
@@ -117,13 +133,14 @@ void DirectoryModel::sort(int column, Qt::SortOrder order)
     emit layoutAboutToBeChanged({}, QAbstractItemModel::VerticalSortHint);
     sort_column_ = column;
     sort_order_ = order;
-    sort_entries();
+    sort_rows();
     emit layoutChanged({}, QAbstractItemModel::VerticalSortHint);
 }
 
-void DirectoryModel::sort_entries()
+void DirectoryModel::sort_rows()
 {
-    // Ties are broken by name, always ascending.
+    // Ties are broken by folder and name, ascending except when sorting by
+    // those descending.
     const auto key = [this](const ducat::Node& node) {
         switch (sort_column_) {
         case Usage:
@@ -136,14 +153,18 @@ void DirectoryModel::sort_entries()
         }
     };
     const bool descending = sort_order_ == Qt::DescendingOrder;
-    std::stable_sort(entries_.begin(), entries_.end(),
-                     [&](const ducat::Node& a, const ducat::Node& b) {
-                         const auto key_a = key(a);
-                         const auto key_b = key(b);
-                         if (key_a != key_b)
-                             return descending ? key_b < key_a : key_a < key_b;
-                         if (sort_column_ == Name && descending)
-                             return b.name < a.name;
-                         return a.name < b.name;
-                     });
+    const bool by_place = sort_column_ == Name || sort_column_ == Folder;
+    std::stable_sort(rows_.begin(), rows_.end(), [&](const Row& a, const Row& b) {
+        const auto key_a = key(a.entry);
+        const auto key_b = key(b.entry);
+        if (key_a != key_b)
+            return descending ? key_b < key_a : key_a < key_b;
+        const auto place = [&](const Row& row) {
+            return sort_column_ == Folder ? std::tie(row.folder, row.entry.name)
+                                          : std::tie(row.entry.name, row.folder);
+        };
+        if (by_place && descending)
+            return place(b) < place(a);
+        return place(a) < place(b);
+    });
 }

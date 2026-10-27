@@ -4,6 +4,8 @@ add_executable(ducat-gui
     main.cpp
     main_window.cpp
     main_window.hpp
+    search_dialog.cpp
+    search_dialog.hpp
     usage_delegate.cpp
     usage_delegate.hpp
 )

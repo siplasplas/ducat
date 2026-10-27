@@ -4,23 +4,35 @@
 
 #include <QAbstractTableModel>
 
+#include <string>
 #include <vector>
 
-// The entries of one stored directory as a sortable table.
+// Entries as a sortable table: the entries of one stored directory, or
+// search results from several directories, each with its folder.
 class DirectoryModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    enum Column { Name, Usage, Disk, Size, Files, Folders, Modified, ColumnCount };
+    enum Column { Name, Usage, Disk, Size, Files, Folders, Modified, Folder, ColumnCount };
     // Usage column: the entry's share of the directory's disk usage, 0 to 1.
     static constexpr int FractionRole = Qt::UserRole;
+
+    // An entry and the directory holding it.
+    struct Row {
+        ducat::Node entry;
+        std::string folder;
+    };
 
     explicit DirectoryModel(QObject* parent = nullptr);
 
     // Shows the children of `dir`, sorted by the current sort column.
     void set_directory(ducat::Node dir);
 
-    const ducat::Node& entry(int row) const { return entries_[static_cast<std::size_t>(row)]; }
+    // Shows entries from any directories, e.g. search results.
+    void set_rows(std::vector<Row> rows);
+
+    const ducat::Node& entry(int row) const { return rows_[static_cast<std::size_t>(row)].entry; }
+    const std::string& folder(int row) const { return rows_[static_cast<std::size_t>(row)].folder; }
     // The row of the entry called `name`, or -1.
     int row_of(const std::string& name) const;
 
@@ -32,10 +44,10 @@ public:
     void sort(int column, Qt::SortOrder order = Qt::AscendingOrder) override;
 
 private:
-    void sort_entries();
+    void sort_rows();
 
-    std::vector<ducat::Node> entries_;
-    std::uint64_t total_disk_ = 0;     // of the shown directory
+    std::vector<Row> rows_;
+    std::uint64_t total_disk_ = 0;     // of the shown directory, 0 for other rows
     int sort_column_ = Disk;
     Qt::SortOrder sort_order_ = Qt::DescendingOrder;
 };

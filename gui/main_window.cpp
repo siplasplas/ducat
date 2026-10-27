@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "directory_model.hpp"
+#include "search_dialog.hpp"
 #include "usage_delegate.hpp"
 
 #include "ducat/database.hpp"
@@ -82,6 +83,11 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     trees->setMenu(trees_menu_);
     toolbar->addWidget(trees);
 
+    QAction* find = toolbar->addAction(icon("edit-find", QStyle::SP_FileDialogContentsView),
+                                       tr("Find…"), this, &MainWindow::show_search);
+    find->setShortcut(QKeySequence::Find);
+    find->setToolTip(tr("Search the stored entries by name, type, size, files or time (Ctrl+F)"));
+
     refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
                                          tr("Refresh"), this, [this] { start_scan(current_); });
     refresh_action_->setShortcut(QKeySequence::Refresh);
@@ -110,6 +116,7 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     view_->sortByColumn(DirectoryModel::Disk, Qt::DescendingOrder);
     view_->header()->setStretchLastSection(false);
     view_->setItemDelegateForColumn(DirectoryModel::Usage, new UsageDelegate(view_));
+    view_->setColumnHidden(DirectoryModel::Folder, true);
     view_->header()->setSectionResizeMode(DirectoryModel::Name, QHeaderView::Stretch);
     for (int column = DirectoryModel::Usage; column < DirectoryModel::ColumnCount; ++column)
         view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
@@ -184,6 +191,8 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
     path_edit_->setText(shown);
     setWindowTitle(tr("%1 – ducat").arg(shown));
     statusBar()->clearMessage();
+    if (search_dialog_)
+        search_dialog_->update_scope();
 
     const int row = select.empty() ? -1 : model_->row_of(select);
     const QModelIndex index = model_->index(row < 0 ? 0 : row, 0);
@@ -354,6 +363,40 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
             message += tr(", %n unreadable", nullptr, static_cast<int>(outcome.errors));
     }
     statusBar()->showMessage(message);
+}
+
+bool MainWindow::with_database(const std::function<void(ducat::Database&)>& use, QString& error)
+{
+    const std::unique_lock lock(database_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        error = tr("The database is being written; try again in a moment");
+        return false;
+    }
+    try {
+        ducat::Database db(database_, ducat::Database::Mode::read);
+        use(db);
+    } catch (const ducat::DatabaseError& e) {
+        error = QString::fromUtf8(e.what());
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::show_entry(const std::string& folder, const std::string& name)
+{
+    open_directory(folder, name);
+    raise();
+    activateWindow();
+}
+
+void MainWindow::show_search()
+{
+    if (!search_dialog_)
+        search_dialog_ = new SearchDialog(*this);
+    search_dialog_->update_scope();
+    search_dialog_->show();
+    search_dialog_->raise();
+    search_dialog_->activateWindow();
 }
 
 void MainWindow::fill_trees_menu()

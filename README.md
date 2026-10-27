@@ -89,6 +89,13 @@ by any column, by default by disk usage. Enter or a double click
 opens a folder, Alt+Up or Backspace goes to the parent, a path typed into the
 bar opens that directory, and the Trees menu lists the stored trees to go to.
 
+Find (Ctrl+F) searches the stored entries with the criteria of `ducat find`:
+type, name pattern, extensions, size and number of files inside with lower and
+upper limits, and modification time, below the shown directory or in all
+stored trees. The matches are listed with their folder and can be sorted like
+a directory; Enter or a double click shows the match in the main window. At
+most 200,000 matches are listed.
+
 Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
 scans the shown directory again, which updates the directories above it as
 `ducat scan` does. Scans run in the background, with the number of entries
