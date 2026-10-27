@@ -97,6 +97,18 @@ inline std::size_t decode_prefix(std::string_view in, std::uint64_t& value) noex
     return size;
 }
 
+// Maps signed to unsigned values so that small magnitudes stay small:
+// 0, -1, 1, -2, 2... become 0, 1, 2, 3, 4...
+inline constexpr std::uint64_t zigzag_encode(std::int64_t value) noexcept
+{
+    return (static_cast<std::uint64_t>(value) << 1) ^ static_cast<std::uint64_t>(value >> 63);
+}
+
+inline constexpr std::int64_t zigzag_decode(std::uint64_t value) noexcept
+{
+    return static_cast<std::int64_t>((value >> 1) ^ (~(value & 1) + 1));
+}
+
 // --- Ordered varint ---
 
 inline std::size_t ordered_size(std::uint64_t value) noexcept

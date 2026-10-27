@@ -103,6 +103,20 @@ void test_ordered(std::vector<std::uint64_t> values)
     }
 }
 
+void test_zigzag(const std::vector<std::uint64_t>& values)
+{
+    CHECK_EQ(varint::zigzag_encode(0), 0u);
+    CHECK_EQ(varint::zigzag_encode(-1), 1u);
+    CHECK_EQ(varint::zigzag_encode(1), 2u);
+    CHECK_EQ(varint::zigzag_encode(INT64_MIN), ~0ULL);
+    CHECK_EQ(varint::zigzag_encode(INT64_MAX), ~0ULL - 1);
+    for (const std::uint64_t value : values) {
+        const auto signed_value = static_cast<std::int64_t>(value);
+        CHECK_EQ(varint::zigzag_decode(varint::zigzag_encode(signed_value)), signed_value);
+        CHECK_EQ(varint::zigzag_decode(varint::zigzag_encode(~signed_value)), ~signed_value);
+    }
+}
+
 } // namespace
 
 int main()
@@ -110,5 +124,6 @@ int main()
     const std::vector<std::uint64_t> values = test_values();
     test_prefix(values);
     test_ordered(values);
+    test_zigzag(values);
     return check::result();
 }
