@@ -253,6 +253,42 @@ void test_refresh_branch()
     check_matches_full_scan(db, root);
 }
 
+void test_roots()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root); // big/ (with segments), sub/deep/, sub-2/
+    fs::create_directories(root / "sub" / "x");
+    const std::string db_file = (temp.path() / "test.tkt").string();
+    const auto path = [&](const char* name) { return (root / name).string(); };
+
+    ducat::Database db(db_file, ducat::Database::Mode::write);
+    CHECK(db.roots().empty());
+
+    // Separate trees, one name extending another, a branch scanned twice.
+    db.store(ducat::scan_tree(path("sub-2")));
+    db.store(ducat::scan_tree(path("sub/deep")));
+    db.store(ducat::scan_tree(path("big")));
+    db.store(ducat::scan_tree(path("sub")));
+    db.store(ducat::scan_tree(path("sub/x")));
+    const std::vector<std::string> separate = {path("big"), path("sub"), path("sub-2")};
+    CHECK(db.roots() == separate);
+
+    // A scan of the parent takes the trees in.
+    db.store(ducat::scan_tree(root.string()));
+    CHECK(db.roots() == std::vector<std::string>{root.string()});
+
+    // "/" covers everything. Storing it removes all records first, so store
+    // an empty "/" by hand, then a tree below it again.
+    ducat::ScanResult top;
+    top.root.name = "/";
+    top.root.is_dir = true;
+    db.store(top);
+    db.store(ducat::scan_tree(root.string()));
+    CHECK(db.read_directory(root.string()).has_value());
+    CHECK(db.roots() == std::vector<std::string>{"/"});
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -273,6 +309,7 @@ int main()
     test_store_and_load();
     test_rescan_and_remove();
     test_refresh_branch();
+    test_roots();
     test_open_errors();
     return check::result();
 }

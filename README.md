@@ -13,6 +13,7 @@ refresh one branch of it and list directories from it.
 ```sh
 ducat scan [-x] [-j N] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
+ducat trees [-d FILE]
 ```
 
 `scan` scans the tree at `PATH`, stores it in the database and prints its disk
@@ -36,6 +37,9 @@ on; the exit status is then 1.
 `ls` prints a stored directory the same way, without scanning; `PATH` defaults
 to the current directory and must lie inside a scanned tree.
 
+`trees` lists the stored trees, that is the scanned directories not lying
+inside another stored tree, with their disk usage and size.
+
 The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
 `-d FILE` (`--database`) selects another file.
 
@@ -48,8 +52,8 @@ ducat-gui [-d FILE] [PATH]
 Browses the stored directories: `PATH`, or the first stored directory. A bar
 shows each entry's share of the directory's disk usage. Entries can be sorted
 by any column, by default by disk usage. Enter or a double click
-opens a folder, Alt+Up or Backspace goes to the parent, and a path typed into
-the bar opens that directory.
+opens a folder, Alt+Up or Backspace goes to the parent, a path typed into the
+bar opens that directory, and the Trees menu lists the stored trees to go to.
 
 Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
 scans the shown directory again, which updates the directories above it as

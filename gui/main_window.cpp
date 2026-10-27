@@ -16,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMenu>
 #include <QProgressBar>
 #include <QStatusBar>
 #include <QStyle>
@@ -69,6 +70,17 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                                      &MainWindow::go_up);
     up->setShortcuts({QKeySequence(Qt::ALT | Qt::Key_Up), QKeySequence(Qt::Key_Backspace)});
     up->setToolTip(tr("Go to the parent directory (Alt+Up, Backspace)"));
+
+    trees_menu_ = new QMenu(this);
+    connect(trees_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_trees_menu);
+    auto* trees = new QToolButton(this);
+    trees->setText(tr("Trees"));
+    trees->setIcon(icon("drive-harddisk", QStyle::SP_DriveHDIcon));
+    trees->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    trees->setToolTip(tr("Go to one of the stored trees"));
+    trees->setPopupMode(QToolButton::InstantPopup);
+    trees->setMenu(trees_menu_);
+    toolbar->addWidget(trees);
 
     refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
                                          tr("Refresh"), this, [this] { start_scan(current_); });
@@ -342,6 +354,47 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
             message += tr(", %n unreadable", nullptr, static_cast<int>(outcome.errors));
     }
     statusBar()->showMessage(message);
+}
+
+void MainWindow::fill_trees_menu()
+{
+    trees_menu_->clear();
+    struct Tree {
+        std::string root;
+        std::uint64_t disk;
+    };
+    std::vector<Tree> trees;
+    {
+        const std::unique_lock lock(database_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            trees_menu_->addAction(tr("The database is being written"))->setEnabled(false);
+            return;
+        }
+        try {
+            ducat::Database db(database_, ducat::Database::Mode::read);
+            for (std::string& root : db.roots()) {
+                const auto record = db.read_directory(root);
+                trees.push_back({std::move(root), record ? record->dir.total_disk : 0});
+            }
+        } catch (const ducat::DatabaseError&) {
+            // No database yet: the menu says there are no trees.
+        }
+    }
+
+    if (trees.empty()) {
+        trees_menu_->addAction(tr("No stored trees; use Scan Folder"))->setEnabled(false);
+        return;
+    }
+    for (const Tree& tree : trees) {
+        QAction* action = trees_menu_->addAction(
+            tr("%1\t%2").arg(to_qstring(tree.root), to_qstring(ducat::format_size(tree.disk))));
+        // Marks the tree holding the shown directory.
+        action->setCheckable(true);
+        action->setChecked(current_ == tree.root
+                           || current_.starts_with(tree.root == "/" ? "/" : tree.root + "/"));
+        const std::string root = tree.root;
+        connect(action, &QAction::triggered, this, [this, root] { open_directory(root); });
+    }
 }
 
 void MainWindow::choose_and_scan()

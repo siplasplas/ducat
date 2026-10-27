@@ -335,6 +335,54 @@ std::optional<std::string> Database::first_directory()
     return key;
 }
 
+std::vector<std::string> Database::roots()
+{
+    // Keys come in byte order. A key is a root unless it lies below a root
+    // found earlier, as a stored parent sorts before its children. Below a
+    // root R come keys starting with R + '/', which all sort before R + '0'
+    // ('0' follows '/'), so the iterator jumps over them; keys in between,
+    // such as "R-b" or segment keys, are checked one by one. `open` holds
+    // the roots whose range of descendants may still be ahead.
+    std::vector<std::string> result;
+    std::vector<std::string> open;
+    const std::unique_ptr<tkrzw::DBM::Iterator> it = dbm_->MakeIterator();
+    tkrzw::Status status = it->First();
+    std::string key;
+    while (status.IsOK()) {
+        status = it->Get(&key);
+        if (!status.IsOK())
+            break;
+        if (key.find('\0') != std::string::npos) { // a segment key
+            status = it->Next();
+            continue;
+        }
+
+        const auto descendants = [](const std::string& root) {
+            return root == "/" ? root : root + '/';
+        };
+        std::erase_if(open, [&](const std::string& root) {
+            std::string end = descendants(root);
+            end.back() = '0';
+            return key >= end;
+        });
+        const auto above = std::find_if(open.begin(), open.end(), [&](const std::string& root) {
+            return key.starts_with(descendants(root));
+        });
+        if (above == open.end()) {
+            result.push_back(key);
+            open.push_back(key);
+            status = it->Next();
+        } else {
+            std::string end = descendants(*above);
+            end.back() = '0';
+            status = it->Jump(end);
+        }
+    }
+    if (!status.IsOK() && status != tkrzw::Status::NOT_FOUND_ERROR)
+        fail(file_, "cannot read", status);
+    return result;
+}
+
 std::string default_database_path()
 {
     const char* cache = std::getenv("XDG_CACHE_HOME");

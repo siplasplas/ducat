@@ -77,6 +77,10 @@ public:
     // the root of a stored tree, or nullopt when the database is empty.
     std::optional<std::string> first_directory();
 
+    // Returns the roots of the stored trees, in key order: the stored
+    // directories whose parent is not stored.
+    std::vector<std::string> roots();
+
 private:
     struct Share;
 

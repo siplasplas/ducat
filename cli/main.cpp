@@ -23,6 +23,7 @@ void print_usage(std::ostream& out)
     out << "Usage: ducat [--help] [--version]\n"
            "       ducat scan [-x] [-j N] [-d FILE] PATH\n"
            "       ducat ls [-d FILE] [PATH]\n"
+           "       ducat trees [-d FILE]\n"
            "\n"
            "Fast disk usage catalog.\n"
            "\n"
@@ -33,6 +34,7 @@ void print_usage(std::ostream& out)
            "                 and a PATH that no longer exists is removed\n"
            "  ls [PATH]      Print a directory from the database, like scan does;\n"
            "                 PATH defaults to the current directory\n"
+           "  trees          List the stored trees with their disk usage\n"
            "\n"
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
@@ -172,6 +174,28 @@ int run_ls(int argc, char* argv[], int first)
     return 0;
 }
 
+int run_trees(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, false, line))
+        return 2;
+    if (!line.path.empty()) {
+        std::cerr << "ducat: trees takes no PATH\n";
+        return 2;
+    }
+
+    ducat::Database db(line.database, ducat::Database::Mode::read);
+    std::printf("%12s %12s  %s\n", "DISK", "SIZE", "TREE");
+    for (const std::string& root : db.roots()) {
+        const std::optional<ducat::record::DirectoryRecord> record = db.read_directory(root);
+        if (!record)
+            continue;
+        std::printf("%12s %12s  %s\n", ducat::format_size(record->dir.total_disk).c_str(),
+                    ducat::format_size(record->dir.total_size).c_str(), root.c_str());
+    }
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[])
@@ -196,6 +220,8 @@ int main(int argc, char* argv[])
             return run_scan(argc, argv, 2);
         if (arg == "ls")
             return run_ls(argc, argv, 2);
+        if (arg == "trees")
+            return run_trees(argc, argv, 2);
     } catch (const ducat::DatabaseError& e) {
         std::cerr << "ducat: " << e.what() << '\n';
         return 1;

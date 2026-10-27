@@ -15,6 +15,7 @@ class DirectoryModel;
 class QAction;
 class QLabel;
 class QLineEdit;
+class QMenu;
 class QModelIndex;
 class QProgressBar;
 class QTimer;
@@ -57,6 +58,7 @@ private:
     void open_entry(const QModelIndex& index);
     void open_typed_path();
     void choose_and_scan();
+    void fill_trees_menu();
     void update_progress();
     void finish_scan(const ScanOutcome& outcome);
     void show_error(const QString& message);
@@ -72,6 +74,7 @@ private:
     QAction* refresh_action_;
     QAction* scan_action_;
     QAction* one_file_system_action_;
+    QMenu* trees_menu_;
     QLabel* progress_label_;
     QProgressBar* progress_bar_;
     QToolButton* cancel_button_;
