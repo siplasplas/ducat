@@ -15,6 +15,7 @@ ducat scan [-x] [-j N] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
+ducat find [-d FILE] [PATH] [CRITERIA] [--sort KEY] [--limit N]
 ```
 
 `scan` scans the tree at `PATH`, stores it in the database and prints its disk
@@ -45,6 +46,33 @@ The database file does not reuse the space of replaced records by itself, so
 `scan` (and the GUI) rebuilds it when the records take over twice the space
 they need; for a scan of `/usr` this takes some 25 ms. `compact` rebuilds it
 at once and prints the file size before and after.
+
+`find` searches the stored entries below `PATH`, or in all stored trees,
+without touching the disk. All given criteria must hold:
+
+- `-t f` or `-t d`: files or directories only;
+- `-e EXT[,EXT…]`: files with one of these extensions, in any case;
+- `-n PATTERN`: names matching a shell pattern such as `'*.log'`, in any case;
+- `--min-size SIZE`, `--max-size SIZE`: disk usage limits such as `500M` or
+  `2G`; a directory counts with all its contents; `--apparent` compares the
+  logical size instead;
+- `--min-files N`, `--max-files N`: directories with that many files inside,
+  at any depth;
+- `--newer WHEN`, `--older WHEN`: modified at or after, or before, a local
+  date `YYYY-MM-DD[ HH:MM]` or a period ago such as `30d`, `2w`, `6m` or `1y`.
+  A directory's time is its own, not that of its contents.
+
+Matches are sorted by size, largest first, or with `--sort files|time|path`;
+`--limit N` prints only the first N. Subtrees whose totals rule out a match
+are skipped, so looking for large directories or ones with many files reads
+little of the database. Examples:
+
+```sh
+ducat find -t d --min-size 10G            # directories of 10 GiB or more
+ducat find --min-files 100000 --sort files
+ducat find ~ -e iso,img --min-size 1G
+ducat find /var/log -n '*.log' --older 1y
+```
 
 The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
 `-d FILE` (`--database`) selects another file.

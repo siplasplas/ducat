@@ -2,10 +2,13 @@
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
 #include "ducat/scanner.hpp"
+#include "ducat/search.hpp"
 #include "ducat/version.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <chrono>
+#include <ctime>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -25,6 +28,7 @@ void print_usage(std::ostream& out)
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
            "       ducat compact [-d FILE]\n"
+           "       ducat find [-d FILE] [PATH] [CRITERIA] [--sort KEY] [--limit N]\n"
            "\n"
            "Fast disk usage catalog.\n"
            "\n"
@@ -38,6 +42,8 @@ void print_usage(std::ostream& out)
            "  trees          List the stored trees with their disk usage\n"
            "  compact        Rebuild the database file to give back unused space;\n"
            "                 scan does this by itself when the file has grown much\n"
+           "  find [PATH]    Search the stored entries below PATH, or in all stored\n"
+           "                 trees, without scanning; see Find criteria below\n"
            "\n"
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
@@ -45,7 +51,23 @@ void print_usage(std::ostream& out)
            "  -d, --database FILE    Database file (default: ~/.cache/ducat/ducat.tkt)\n"
            "  -x, --one-file-system  Do not descend into other file systems (scan)\n"
            "  -j, --threads N        Scan with N threads (scan; default: "
-        << ducat::default_scan_threads() << ")\n";
+        << ducat::default_scan_threads()
+        << ")\n"
+           "\n"
+           "Find criteria (all must hold):\n"
+           "  -t, --type f|d         Files or directories only\n"
+           "  -e, --ext EXT[,EXT]    Files with one of these extensions (repeatable)\n"
+           "  -n, --name PATTERN     Names matching a shell pattern, e.g. '*.log'\n"
+           "  --min-size SIZE        At least SIZE, e.g. 500M or 2G; directories count\n"
+           "  --max-size SIZE        At most SIZE   with their contents (disk usage)\n"
+           "  --apparent             Compare the logical size instead of disk usage\n"
+           "  --min-files N          Directories with at least N files inside\n"
+           "  --max-files N          Directories with at most N files inside\n"
+           "  --newer WHEN           Modified at or after WHEN: YYYY-MM-DD[ HH:MM], or\n"
+           "                         a period ago such as 30d, 2w, 6m, 1y, 12h\n"
+           "  --older WHEN           Modified before WHEN\n"
+           "  --sort KEY             size (default), files, time or path\n"
+           "  --limit N              Print only the first N matches\n";
 }
 
 // Prints a directory's totals, `extra` appended to them, and its entries
@@ -199,6 +221,151 @@ int run_trees(int argc, char* argv[], int first)
     return 0;
 }
 
+std::optional<std::uint64_t> parse_count(std::string_view text)
+{
+    std::uint64_t value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc() || end != text.data() + text.size() || text.empty())
+        return std::nullopt;
+    return value;
+}
+
+int run_find(int argc, char* argv[], int first)
+{
+    std::string database = ducat::default_database_path();
+    std::string path;
+    ducat::SearchQuery query;
+    std::string sort = "size";
+    std::size_t limit = 0;
+    const std::time_t now = std::time(nullptr);
+
+    for (int i = first; i < argc; ++i) {
+        const std::string_view arg = argv[i];
+        const auto value = [&]() -> std::optional<std::string_view> {
+            if (i + 1 >= argc) {
+                std::cerr << "ducat: " << arg << " needs a value\n";
+                return std::nullopt;
+            }
+            return std::string_view(argv[++i]);
+        };
+        const auto invalid = [&](std::string_view text) {
+            std::cerr << "ducat: invalid value for " << arg << ": '" << text << "'\n";
+            return 2;
+        };
+
+        if (arg == "-d" || arg == "--database" || arg == "-t" || arg == "--type" || arg == "-e"
+            || arg == "--ext" || arg == "-n" || arg == "--name" || arg == "--min-size"
+            || arg == "--max-size" || arg == "--min-files" || arg == "--max-files"
+            || arg == "--newer" || arg == "--older" || arg == "--sort" || arg == "--limit") {
+            const std::optional<std::string_view> text = value();
+            if (!text)
+                return 2;
+            if (arg == "-d" || arg == "--database") {
+                database = *text;
+            } else if (arg == "-t" || arg == "--type") {
+                if (*text == "f")
+                    query.type = ducat::SearchQuery::Type::file;
+                else if (*text == "d")
+                    query.type = ducat::SearchQuery::Type::directory;
+                else
+                    return invalid(*text);
+            } else if (arg == "-e" || arg == "--ext") {
+                std::string_view rest = *text;
+                while (!rest.empty()) {
+                    const std::size_t comma = rest.find(',');
+                    std::string_view extension = rest.substr(0, comma);
+                    if (extension.starts_with('.'))
+                        extension.remove_prefix(1);
+                    if (!extension.empty())
+                        query.extensions.emplace_back(extension);
+                    rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+                }
+            } else if (arg == "-n" || arg == "--name") {
+                query.name_pattern = *text;
+            } else if (arg == "--min-size" || arg == "--max-size") {
+                const std::optional<std::uint64_t> size = ducat::parse_size(*text);
+                if (!size)
+                    return invalid(*text);
+                (arg == "--min-size" ? query.min_size : query.max_size) = *size;
+            } else if (arg == "--min-files" || arg == "--max-files") {
+                const std::optional<std::uint64_t> count = parse_count(*text);
+                if (!count)
+                    return invalid(*text);
+                (arg == "--min-files" ? query.min_files : query.max_files) = *count;
+            } else if (arg == "--newer" || arg == "--older") {
+                const std::optional<std::int64_t> time = ducat::parse_time(*text, now);
+                if (!time)
+                    return invalid(*text);
+                (arg == "--newer" ? query.modified_after : query.modified_before) = *time;
+            } else if (arg == "--sort") {
+                if (*text != "size" && *text != "files" && *text != "time" && *text != "path")
+                    return invalid(*text);
+                sort = *text;
+            } else if (arg == "--limit") {
+                const std::optional<std::uint64_t> count = parse_count(*text);
+                if (!count || *count == 0)
+                    return invalid(*text);
+                limit = static_cast<std::size_t>(*count);
+            }
+        } else if (arg == "--apparent") {
+            query.apparent_size = true;
+        } else if (arg.starts_with('-') && arg != "-") {
+            std::cerr << "ducat: unknown option '" << arg << "'\n";
+            return 2;
+        } else if (path.empty()) {
+            path = ducat::resolve_path(arg);
+        } else {
+            std::cerr << "ducat: only one PATH is allowed\n";
+            return 2;
+        }
+    }
+
+    struct Match {
+        std::string path;
+        ducat::Node entry;
+    };
+    std::vector<Match> found;
+    ducat::Database db(database, ducat::Database::Mode::read);
+    ducat::search(db, query, path, [&](const std::string& match_path, const ducat::Node& entry) {
+        found.push_back({match_path, entry});
+        return true;
+    });
+    db.close();
+
+    const auto by = [&](const Match& a, const Match& b) {
+        if (sort == "path")
+            return a.path < b.path;
+        if (sort == "files" && a.entry.files != b.entry.files)
+            return a.entry.files > b.entry.files;
+        if (sort == "time" && a.entry.modified != b.entry.modified)
+            return a.entry.modified > b.entry.modified;
+        const std::uint64_t size_a = ducat::search_size(query, a.entry);
+        const std::uint64_t size_b = ducat::search_size(query, b.entry);
+        if (sort != "time" && size_a != size_b)
+            return size_a > size_b;
+        return a.path < b.path;
+    };
+    std::sort(found.begin(), found.end(), by);
+    const std::size_t shown = limit == 0 ? found.size() : std::min(limit, found.size());
+
+    std::printf("%12s %12s %9s  %-16s  %s\n", "DISK", "SIZE", "FILES", "MODIFIED", "PATH");
+    for (std::size_t i = 0; i < shown; ++i) {
+        const ducat::Node& entry = found[i].entry;
+        const bool dir = entry.is_dir;
+        const std::string files = dir ? std::to_string(entry.files) : "-";
+        std::printf("%12s %12s %9s  %-16s  %s%s\n",
+                    ducat::format_size(dir ? entry.total_disk : entry.disk).c_str(),
+                    ducat::format_size(dir ? entry.total_size : entry.size).c_str(),
+                    files.c_str(), ducat::format_time(entry.modified).c_str(),
+                    found[i].path.c_str(), dir ? "/" : "");
+    }
+    if (shown < found.size())
+        std::printf("%zu of %zu matches shown\n", shown, found.size());
+    else
+        std::printf("%zu matches\n", found.size());
+    return 0;
+}
+
 int run_compact(int argc, char* argv[], int first)
 {
     CommandLine line;
@@ -252,6 +419,8 @@ int main(int argc, char* argv[])
             return run_trees(argc, argv, 2);
         if (arg == "compact")
             return run_compact(argc, argv, 2);
+        if (arg == "find")
+            return run_find(argc, argv, 2);
     } catch (const ducat::DatabaseError& e) {
         std::cerr << "ducat: " << e.what() << '\n';
         return 1;

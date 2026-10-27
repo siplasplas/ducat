@@ -1,4 +1,4 @@
-foreach(name IN ITEMS varint scanner record path database)
+foreach(name IN ITEMS varint scanner record path database search)
     add_executable(test_${name} test_${name}.cpp)
     target_link_libraries(test_${name} PRIVATE ducat::libducat)
     target_compile_options(test_${name} PRIVATE -Wall -Wextra -Wpedantic)

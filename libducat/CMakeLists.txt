@@ -6,6 +6,7 @@ add_library(libducat
     src/path.cpp
     src/record.cpp
     src/scanner.cpp
+    src/search.cpp
     src/version.cpp
 )
 add_library(ducat::libducat ALIAS libducat)
