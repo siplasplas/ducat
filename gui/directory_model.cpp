@@ -24,6 +24,7 @@ DirectoryModel::DirectoryModel(QObject* parent) : QAbstractTableModel(parent) {}
 void DirectoryModel::set_directory(ducat::Node dir)
 {
     beginResetModel();
+    total_disk_ = dir.total_disk;
     entries_ = std::move(dir.children);
     sort_entries();
     endResetModel();
@@ -52,11 +53,19 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         return {};
     const ducat::Node& entry = this->entry(index.row());
     const int column = index.column();
+    const double fraction = total_disk_ == 0
+        ? 0.0
+        : static_cast<double>(entry.total_disk) / static_cast<double>(total_disk_);
 
     switch (role) {
+    case FractionRole:
+        if (column == Usage)
+            return fraction;
+        break;
     case Qt::DisplayRole:
         switch (column) {
         case Name: return QString::fromStdString(entry.name);
+        case Usage: return tr("%1 %").arg(QLocale().toString(fraction * 100, 'f', 1));
         case Disk: return size_text(entry.total_disk);
         case Size: return size_text(entry.total_size);
         case Files: return entry.is_dir ? QLocale().toString(qulonglong(entry.files)) : QString();
@@ -67,6 +76,8 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         }
         break;
     case Qt::ToolTipRole:
+        if (column == Usage)
+            return tr("Share of the disk usage of this directory");
         if (column == Disk || column == Size) {
             const std::uint64_t bytes = column == Disk ? entry.total_disk : entry.total_size;
             return tr("%1 bytes").arg(QLocale().toString(qulonglong(bytes)));
@@ -91,6 +102,7 @@ QVariant DirectoryModel::headerData(int section, Qt::Orientation orientation, in
         return {};
     switch (section) {
     case Name: return tr("Name");
+    case Usage: return tr("Usage");
     case Disk: return tr("Disk usage");
     case Size: return tr("Size");
     case Files: return tr("Files");
@@ -114,6 +126,7 @@ void DirectoryModel::sort_entries()
     // Ties are broken by name, always ascending.
     const auto key = [this](const ducat::Node& node) {
         switch (sort_column_) {
+        case Usage:
         case Disk: return std::tuple(node.total_disk, std::int64_t{0});
         case Size: return std::tuple(node.total_size, std::int64_t{0});
         case Files: return std::tuple(node.files, std::int64_t{0});

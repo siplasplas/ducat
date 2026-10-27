@@ -4,6 +4,8 @@ add_executable(ducat-gui
     main.cpp
     main_window.cpp
     main_window.hpp
+    usage_delegate.cpp
+    usage_delegate.hpp
 )
 
 set_target_properties(ducat-gui PROPERTIES AUTOMOC ON)

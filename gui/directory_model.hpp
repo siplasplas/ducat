@@ -11,7 +11,9 @@ class DirectoryModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    enum Column { Name, Disk, Size, Files, Folders, Modified, ColumnCount };
+    enum Column { Name, Usage, Disk, Size, Files, Folders, Modified, ColumnCount };
+    // Usage column: the entry's share of the directory's disk usage, 0 to 1.
+    static constexpr int FractionRole = Qt::UserRole;
 
     explicit DirectoryModel(QObject* parent = nullptr);
 
@@ -33,6 +35,7 @@ private:
     void sort_entries();
 
     std::vector<ducat::Node> entries_;
+    std::uint64_t total_disk_ = 0;     // of the shown directory
     int sort_column_ = Disk;
     Qt::SortOrder sort_order_ = Qt::DescendingOrder;
 };

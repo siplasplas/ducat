@@ -45,8 +45,9 @@ The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
 ducat-gui [-d FILE] [PATH]
 ```
 
-Browses the stored directories: `PATH`, or the first stored directory. Entries
-can be sorted by any column, by default by disk usage. Enter or a double click
+Browses the stored directories: `PATH`, or the first stored directory. A bar
+shows each entry's share of the directory's disk usage. Entries can be sorted
+by any column, by default by disk usage. Enter or a double click
 opens a folder, Alt+Up or Backspace goes to the parent, and a path typed into
 the bar opens that directory.
 

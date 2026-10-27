@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "directory_model.hpp"
+#include "usage_delegate.hpp"
 
 #include "ducat/database.hpp"
 #include "ducat/format.hpp"
@@ -96,8 +97,9 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     view_->setSortingEnabled(true);
     view_->sortByColumn(DirectoryModel::Disk, Qt::DescendingOrder);
     view_->header()->setStretchLastSection(false);
+    view_->setItemDelegateForColumn(DirectoryModel::Usage, new UsageDelegate(view_));
     view_->header()->setSectionResizeMode(DirectoryModel::Name, QHeaderView::Stretch);
-    for (int column = DirectoryModel::Disk; column < DirectoryModel::ColumnCount; ++column)
+    for (int column = DirectoryModel::Usage; column < DirectoryModel::ColumnCount; ++column)
         view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
     connect(view_, &QTreeView::activated, this, &MainWindow::open_entry);
     setCentralWidget(view_);
