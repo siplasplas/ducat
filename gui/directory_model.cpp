@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QFont>
 #include <QLocale>
 #include <QStyle>
 
@@ -15,6 +16,25 @@ namespace {
 QString size_text(std::uint64_t bytes)
 {
     return QString::fromStdString(ducat::format_size(bytes));
+}
+
+// The sizes shown: a directory's totals, or a file's own sizes. A file
+// whose data is counted at another hard link has zero totals, but still
+// shows its own size.
+std::uint64_t shown_disk(const ducat::Node& entry)
+{
+    return entry.is_dir ? entry.total_disk : entry.disk;
+}
+
+std::uint64_t shown_size(const ducat::Node& entry)
+{
+    return entry.is_dir ? entry.total_size : entry.size;
+}
+
+// A hard link whose data is counted at another link.
+bool counted_elsewhere(const ducat::Node& entry)
+{
+    return !entry.is_dir && (entry.total_disk != entry.disk || entry.total_size != entry.size);
 }
 
 } // namespace
@@ -78,8 +98,8 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         switch (column) {
         case Name: return QString::fromStdString(entry.name);
         case Usage: return tr("%1 %").arg(QLocale().toString(fraction * 100, 'f', 1));
-        case Disk: return size_text(entry.total_disk);
-        case Size: return size_text(entry.total_size);
+        case Disk: return size_text(shown_disk(entry));
+        case Size: return size_text(shown_size(entry));
         case Files: return entry.is_dir ? QLocale().toString(qulonglong(entry.files)) : QString();
         case Folders: return entry.is_dir ? QLocale().toString(qulonglong(entry.dirs)) : QString();
         case Modified:
@@ -88,11 +108,21 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         case Folder: return QString::fromStdString(folder(index.row()));
         }
         break;
+    case Qt::FontRole:
+        if (counted_elsewhere(entry)) {
+            QFont font;
+            font.setItalic(true);
+            return font;
+        }
+        break;
     case Qt::ToolTipRole:
+        if (counted_elsewhere(entry) && column != Folder)
+            return tr("A hard link whose data is counted once, at another link, so it adds "
+                      "nothing to the folder totals");
         if (column == Usage)
             return tr("Share of the disk usage of this directory");
         if (column == Disk || column == Size) {
-            const std::uint64_t bytes = column == Disk ? entry.total_disk : entry.total_size;
+            const std::uint64_t bytes = column == Disk ? shown_disk(entry) : shown_size(entry);
             return tr("%1 bytes").arg(QLocale().toString(qulonglong(bytes)));
         }
         if (column == Folder)
@@ -143,9 +173,9 @@ void DirectoryModel::sort_rows()
     // those descending.
     const auto key = [this](const ducat::Node& node) {
         switch (sort_column_) {
-        case Usage:
-        case Disk: return std::tuple(node.total_disk, std::int64_t{0});
-        case Size: return std::tuple(node.total_size, std::int64_t{0});
+        case Usage: return std::tuple(node.total_disk, std::int64_t{0});
+        case Disk: return std::tuple(shown_disk(node), std::int64_t{0});
+        case Size: return std::tuple(shown_size(node), std::int64_t{0});
         case Files: return std::tuple(node.files, std::int64_t{0});
         case Folders: return std::tuple(node.dirs, std::int64_t{0});
         case Modified: return std::tuple(std::uint64_t{0}, node.modified);

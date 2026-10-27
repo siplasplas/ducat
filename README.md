@@ -36,6 +36,12 @@ counted once within the rescanned branch only.
 Entries that cannot be read are reported on standard error and the scan goes
 on; the exit status is then 1.
 
+A file with several hard links (common in Anaconda or Nix, for example) has
+its data counted once, at the first link found. Listings still show each link
+with the file's own size, marked `(=)` by `ls` and in italics by the GUI where
+the data is counted at another link; such a link adds nothing to the totals
+of its folder.
+
 `ls` prints a stored directory the same way, without scanning; `PATH` defaults
 to the current directory and must lie inside a scanned tree.
 

@@ -80,21 +80,35 @@ void print_directory(const ducat::Node& dir, const std::string& extra)
                 static_cast<unsigned long long>(dir.files),
                 static_cast<unsigned long long>(dir.dirs), extra.c_str());
 
+    // A directory shows its totals, a file its own sizes, also when it is a
+    // hard link counted elsewhere and so has zero totals.
+    const auto disk = [](const ducat::Node* entry) {
+        return entry->is_dir ? entry->total_disk : entry->disk;
+    };
+    const auto size = [](const ducat::Node* entry) {
+        return entry->is_dir ? entry->total_size : entry->size;
+    };
     std::vector<const ducat::Node*> entries;
     entries.reserve(dir.children.size());
     for (const ducat::Node& child : dir.children)
         entries.push_back(&child);
-    std::sort(entries.begin(), entries.end(), [](const ducat::Node* a, const ducat::Node* b) {
-        if (a->total_disk != b->total_disk)
-            return a->total_disk > b->total_disk;
+    std::sort(entries.begin(), entries.end(), [&](const ducat::Node* a, const ducat::Node* b) {
+        if (disk(a) != disk(b))
+            return disk(a) > disk(b);
         return a->name < b->name;
     });
 
     std::printf("%12s %12s  %s\n", "DISK", "SIZE", "NAME");
-    for (const ducat::Node* entry : entries)
-        std::printf("%12s %12s  %s%s\n", ducat::format_size(entry->total_disk).c_str(),
-                    ducat::format_size(entry->total_size).c_str(), entry->name.c_str(),
-                    entry->is_dir ? "/" : "");
+    bool any_counted_elsewhere = false;
+    for (const ducat::Node* entry : entries) {
+        const bool counted_elsewhere = !entry->is_dir && entry->total_disk != entry->disk;
+        any_counted_elsewhere |= counted_elsewhere;
+        std::printf("%12s %12s  %s%s%s\n", ducat::format_size(disk(entry)).c_str(),
+                    ducat::format_size(size(entry)).c_str(), entry->name.c_str(),
+                    entry->is_dir ? "/" : "", counted_elsewhere ? "  (=)" : "");
+    }
+    if (any_counted_elsewhere)
+        std::printf("\n(=) a hard link whose data is counted once, at another link\n");
 }
 
 struct CommandLine {
