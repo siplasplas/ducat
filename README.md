@@ -1,2 +1,2 @@
-# dex
+# ducat
 Disk catalog
