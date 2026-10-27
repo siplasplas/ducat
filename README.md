@@ -3,7 +3,7 @@ Disk catalog
 
 A fast disk usage analyzer in the spirit of `du`, `duc` and `ncdu` for Linux.
 The core logic lives in the `libducat` library; the command-line tool and the
-planned GUI are thin frontends over it.
+Qt GUI are thin frontends over it.
 
 Work in progress: the tool can scan a directory tree, store it in a database,
 refresh one branch of it and list directories from it.
@@ -39,6 +39,19 @@ to the current directory and must lie inside a scanned tree.
 The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
 `-d FILE` (`--database`) selects another file.
 
+### GUI
+
+```sh
+ducat-gui [-d FILE] [PATH]
+```
+
+Browses the stored directories: `PATH`, or the first stored directory. Entries
+can be sorted by any column, by default by disk usage. Enter or a double click
+opens a folder, Alt+Up or Backspace goes to the parent, F5 reads the directory
+from the database again, and a path typed into the bar opens that directory.
+The GUI does not scan yet; use `ducat scan`. It opens the database only for the
+moment of each read, so `ducat scan` can run while the GUI is open.
+
 ## Building
 
 Requirements: CMake 3.20 or newer, a C++20 compiler and `make`.
@@ -56,7 +69,8 @@ instead, configure with `-DDUCAT_SYSTEM_TKRZW=ON`; configuration then checks
 that it can remove records, which the Ubuntu package `libtkrzw-dev` 1.0.32
 cannot.
 
-Optional: Qt 6 (`sudo apt install qt6-base-dev`) for the planned GUI.
+The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
+(`sudo apt install qt6-base-dev`); `-DDUCAT_BUILD_GUI=OFF` skips it.
 
 Pass `-DBUILD_SHARED_LIBS=ON` to build `libducat` as a shared library.
 

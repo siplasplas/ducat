@@ -6,6 +6,8 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cstdlib>
+#include <filesystem>
 #include <system_error>
 #include <utility>
 
@@ -315,6 +317,35 @@ std::optional<Node> Database::load_directory(std::string_view path)
     if (dir.children.size() != record->entry_count)
         throw DatabaseError(file_ + ": wrong entry count of " + dir.name);
     return dir;
+}
+
+std::optional<std::string> Database::first_directory()
+{
+    // Paths start with '/'; the first key is a directory key, as the
+    // segments of a directory sort after its own key.
+    const std::unique_ptr<tkrzw::DBM::Iterator> it = dbm_->MakeIterator();
+    tkrzw::Status status = it->First();
+    std::string key;
+    if (status.IsOK())
+        status = it->Get(&key);
+    if (status == tkrzw::Status::NOT_FOUND_ERROR)
+        return std::nullopt;
+    if (!status.IsOK())
+        fail(file_, "cannot read", status);
+    return key;
+}
+
+std::string default_database_path()
+{
+    const char* cache = std::getenv("XDG_CACHE_HOME");
+    std::filesystem::path dir;
+    if (cache && *cache) {
+        dir = cache;
+    } else {
+        const char* home = std::getenv("HOME");
+        dir = std::filesystem::path(home ? home : ".") / ".cache";
+    }
+    return (dir / "ducat" / "ducat.tkt").string();
 }
 
 RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options)

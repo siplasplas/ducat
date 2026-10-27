@@ -20,16 +20,22 @@ option(DUCAT_BUILD_TESTS "Build the unit tests" ON)
 # Tkrzw stores the database.
 include(cmake/Tkrzw.cmake)
 
-# Qt is optional for now, detected for the planned GUI.
-find_package(Qt6 QUIET COMPONENTS Widgets)
-if(Qt6_FOUND)
-    message(STATUS "Qt: ${Qt6_VERSION}")
-else()
-    message(STATUS "Qt: not found (install qt6-base-dev)")
+# Qt 6 for the GUI, which is skipped when Qt is missing.
+option(DUCAT_BUILD_GUI "Build the Qt GUI when Qt 6 is found" ON)
+if(DUCAT_BUILD_GUI)
+    find_package(Qt6 QUIET COMPONENTS Widgets)
+    if(Qt6_FOUND)
+        message(STATUS "Qt: ${Qt6_VERSION}, building ducat-gui")
+    else()
+        message(STATUS "Qt: not found, skipping ducat-gui (install qt6-base-dev)")
+    endif()
 endif()
 
 add_subdirectory(libducat)
 add_subdirectory(cli)
+if(DUCAT_BUILD_GUI AND Qt6_FOUND)
+    add_subdirectory(gui)
+endif()
 
 if(DUCAT_BUILD_TESTS)
     enable_testing()

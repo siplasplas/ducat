@@ -2,6 +2,7 @@ configure_file(src/config.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/config.h
 
 add_library(libducat
     src/database.cpp
+    src/format.cpp
     src/path.cpp
     src/record.cpp
     src/scanner.cpp

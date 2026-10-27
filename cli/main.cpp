@@ -1,4 +1,5 @@
 #include "ducat/database.hpp"
+#include "ducat/format.hpp"
 #include "ducat/path.hpp"
 #include "ducat/scanner.hpp"
 #include "ducat/version.hpp"
@@ -42,43 +43,13 @@ void print_usage(std::ostream& out)
         << ducat::default_scan_threads() << ")\n";
 }
 
-std::string default_database()
-{
-    const char* cache = std::getenv("XDG_CACHE_HOME");
-    std::filesystem::path dir;
-    if (cache && *cache) {
-        dir = cache;
-    } else {
-        const char* home = std::getenv("HOME");
-        dir = std::filesystem::path(home ? home : ".") / ".cache";
-    }
-    return (dir / "ducat" / "ducat.tkt").string();
-}
-
-// Formats a byte count with binary units, e.g. "1.5 GiB".
-std::string format_size(std::uint64_t bytes)
-{
-    static constexpr const char* units[] = {"B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB"};
-    if (bytes < 1024)
-        return std::to_string(bytes) + " B";
-    double value = static_cast<double>(bytes);
-    std::size_t unit = 0;
-    while (value >= 1024 && unit + 1 < std::size(units)) {
-        value /= 1024;
-        ++unit;
-    }
-    char buffer[32];
-    std::snprintf(buffer, sizeof buffer, "%.1f %s", value, units[unit]);
-    return buffer;
-}
-
 // Prints a directory's totals, `extra` appended to them, and its entries
 // sorted by disk usage.
 void print_directory(const ducat::Node& dir, const std::string& extra)
 {
     std::printf("%s\n", dir.name.c_str());
     std::printf("  disk %s, size %s, %llu files, %llu dirs%s\n\n",
-                format_size(dir.total_disk).c_str(), format_size(dir.total_size).c_str(),
+                ducat::format_size(dir.total_disk).c_str(), ducat::format_size(dir.total_size).c_str(),
                 static_cast<unsigned long long>(dir.files),
                 static_cast<unsigned long long>(dir.dirs), extra.c_str());
 
@@ -94,13 +65,13 @@ void print_directory(const ducat::Node& dir, const std::string& extra)
 
     std::printf("%12s %12s  %s\n", "DISK", "SIZE", "NAME");
     for (const ducat::Node* entry : entries)
-        std::printf("%12s %12s  %s%s\n", format_size(entry->total_disk).c_str(),
-                    format_size(entry->total_size).c_str(), entry->name.c_str(),
+        std::printf("%12s %12s  %s%s\n", ducat::format_size(entry->total_disk).c_str(),
+                    ducat::format_size(entry->total_size).c_str(), entry->name.c_str(),
                     entry->is_dir ? "/" : "");
 }
 
 struct CommandLine {
-    std::string database = default_database();
+    std::string database = ducat::default_database_path();
     ducat::ScanOptions scan;
     std::string path;
 };

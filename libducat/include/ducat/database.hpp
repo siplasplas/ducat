@@ -73,6 +73,10 @@ public:
     // the normalized path. Returns nullopt when it is not in the database.
     std::optional<Node> load_directory(std::string_view path);
 
+    // Returns the path of the first stored directory in key order, which is
+    // the root of a stored tree, or nullopt when the database is empty.
+    std::optional<std::string> first_directory();
+
 private:
     struct Share;
 
@@ -88,6 +92,10 @@ private:
     std::string file_;
     std::unique_ptr<tkrzw::TreeDBM> dbm_;
 };
+
+// The default database file: ducat/ducat.tkt in $XDG_CACHE_HOME, or in
+// ~/.cache when that is not set.
+std::string default_database_path();
 
 struct RefreshResult {
     ScanResult scan;               // empty when the tree was removed
