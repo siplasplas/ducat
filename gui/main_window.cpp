@@ -400,7 +400,10 @@ void MainWindow::fill_trees_menu()
 void MainWindow::choose_and_scan()
 {
     const QString start = current_.empty() ? QDir::homePath() : to_qstring(current_);
-    const QString dir = QFileDialog::getExistingDirectory(this, tr("Scan Folder"), start);
+    // Qt's own dialog rather than the platform's.
+    const QString dir = QFileDialog::getExistingDirectory(
+        this, tr("Scan Folder"), start,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
     if (!dir.isEmpty())
         start_scan(dir.toStdString());
 }
