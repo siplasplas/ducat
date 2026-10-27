@@ -41,3 +41,12 @@ sudo apt install libtkrzw-dev qt6-base-dev
 ```
 
 Pass `-DBUILD_SHARED_LIBS=ON` to build `libducat` as a shared library.
+
+## Tests
+
+Unit tests are built by default (`-DDUCAT_BUILD_TESTS=OFF` turns them off) and
+take well under a second:
+
+```sh
+ctest --test-dir build --output-on-failure
+```

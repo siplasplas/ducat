@@ -15,6 +15,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(BUILD_SHARED_LIBS "Build libducat as a shared library" OFF)
+option(DUCAT_BUILD_TESTS "Build the unit tests" ON)
 
 # Optional dependencies, detected now and required by later stages:
 # Tkrzw for the database, Qt for the GUI.
@@ -37,3 +38,8 @@ endif()
 
 add_subdirectory(libducat)
 add_subdirectory(cli)
+
+if(DUCAT_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

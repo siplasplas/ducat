@@ -1,0 +1,6 @@
+foreach(name IN ITEMS varint scanner)
+    add_executable(test_${name} test_${name}.cpp)
+    target_link_libraries(test_${name} PRIVATE ducat::libducat)
+    target_compile_options(test_${name} PRIVATE -Wall -Wextra -Wpedantic)
+    add_test(NAME ${name} COMMAND test_${name})
+endforeach()
