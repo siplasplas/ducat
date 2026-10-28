@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=ducat
+GenericName=Disk Catalog
+Comment=Browse and search the disk usage of scanned drives
+Exec=ducat-gui
+Icon=ducat
+Terminal=false
+Categories=Qt;Utility;FileTools;
+Keywords=disk;usage;catalog;du;space;search;
+StartupWMClass=ducat-gui

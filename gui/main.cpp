@@ -7,6 +7,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QFileInfo>
+#include <QIcon>
 #include <QSettings>
 
 #include <cstdio>
@@ -19,6 +20,10 @@ int main(int argc, char* argv[])
     QApplication::setApplicationName("ducat");
     QApplication::setOrganizationName("siplasplas");
     QApplication::setApplicationVersion(QString::fromUtf8(ducat::version()));
+    // The installed ducat.desktop; on Wayland it ties the window to its icon.
+    QApplication::setDesktopFileName(QStringLiteral("ducat"));
+    QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("ducat"),
+                                                 QIcon(QStringLiteral(":/ducat.svg"))));
 
     QCommandLineParser parser;
     parser.setApplicationDescription(

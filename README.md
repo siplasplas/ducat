@@ -150,6 +150,19 @@ The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
 
 Pass `-DBUILD_SHARED_LIBS=ON` to build `libducat` as a shared library.
 
+## Installing
+
+```sh
+sudo cmake --install build                  # to /usr/local
+cmake --install build --prefix ~/.local     # for the current user only
+```
+
+This installs `ducat` and `ducat-gui` to `bin`, and with the GUI also
+`share/applications/ducat.desktop` and the icon
+`share/icons/hicolor/scalable/apps/ducat.svg`, so ducat appears in the menu of
+the desktop. A shared `libducat` goes to `lib`, where the installed programs
+find it. Remove the files listed in `build/install_manifest.txt` to uninstall.
+
 ## Tests
 
 Unit tests are built by default (`-DDUCAT_BUILD_TESTS=OFF` turns them off) and

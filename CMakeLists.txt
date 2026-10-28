@@ -17,6 +17,11 @@ endif()
 option(BUILD_SHARED_LIBS "Build libducat as a shared library" OFF)
 option(DUCAT_BUILD_TESTS "Build the unit tests" ON)
 
+# Installation: cmake --install build [--prefix DIR], by default to /usr/local.
+include(GNUInstallDirs)
+# Installed programs find an installed shared libducat next to them.
+set(CMAKE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+
 # Tkrzw stores the database.
 include(cmake/Tkrzw.cmake)
 
@@ -35,6 +40,9 @@ add_subdirectory(libducat)
 add_subdirectory(cli)
 if(DUCAT_BUILD_GUI AND Qt6_FOUND)
     add_subdirectory(gui)
+    install(FILES res/ducat.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES res/ducat.svg
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
 endif()
 
 if(DUCAT_BUILD_TESTS)

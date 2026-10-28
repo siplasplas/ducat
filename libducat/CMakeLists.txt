@@ -25,3 +25,9 @@ target_include_directories(libducat
 target_link_libraries(libducat PRIVATE ducat_tkrzw)
 
 target_compile_options(libducat PRIVATE -Wall -Wextra -Wpedantic)
+
+# A static libducat is linked into the programs; a shared one is needed at
+# run time. Headers are not installed yet.
+if(BUILD_SHARED_LIBS)
+    install(TARGETS libducat LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
+endif()

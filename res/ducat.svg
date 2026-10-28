@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ducat icon: a gold coin with a hard disk and a folder tree. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- Coin -->
+  <circle cx="128" cy="128" r="122" fill="#f2a516"/>
+  <circle cx="128" cy="128" r="104" fill="#fcc433" stroke="#9a6200" stroke-width="7"/>
+
+  <g fill="none" stroke="#7d5000" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Hard disk: case, platter and head arm -->
+    <rect x="46" y="70" width="74" height="114" rx="20"/>
+    <circle cx="83" cy="110" r="26"/>
+    <path d="M100 164 L86 124"/>
+
+    <!-- Folder tree: trunk and branches -->
+    <path d="M148 100 V170 M148 134 H164 M148 170 H164"/>
+  </g>
+  <!-- Platter hub and the pivot of the head arm -->
+  <circle cx="83" cy="110" r="6" fill="#7d5000"/>
+  <circle cx="100" cy="164" r="8" fill="#7d5000"/>
+
+  <!-- Folders -->
+  <g fill="#7d5000">
+    <path d="M136 70 h15 l6 7 h19 a4 4 0 0 1 4 4 v19 a4 4 0 0 1 -4 4 h-40 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z"/>
+    <path d="M168 116 h15 l6 7 h19 a4 4 0 0 1 4 4 v19 a4 4 0 0 1 -4 4 h-40 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z"/>
+    <path d="M168 152 h15 l6 7 h19 a4 4 0 0 1 4 4 v19 a4 4 0 0 1 -4 4 h-40 a4 4 0 0 1 -4 -4 v-26 a4 4 0 0 1 4 -4 z"/>
+  </g>
+</svg>
