@@ -117,6 +117,8 @@ private:
     // F5: scans the shown directory again, or stores the archive read from disk.
     void refresh();
     void store_live_archive();
+    // Removes the stored contents of the archives below the shown folder.
+    void strip_archives();
     // Whether `path` lies in the stored contents of an archive, not on disk.
     bool inside_contents(const std::string& path);
     void open_typed_path();
@@ -146,6 +148,7 @@ private:
     QAction* scan_action_;
     QAction* one_file_system_action_;
     QAction* archives_action_;
+    QAction* strip_action_;
     QAction* database_action_;
     QMenu* trees_menu_;
     SearchDialog* search_dialog_ = nullptr; // created when first needed

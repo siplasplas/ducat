@@ -15,6 +15,7 @@ ducat scan [-x] [-j N] [-a] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
+ducat strip [-d FILE] [PATH]
 ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]
 ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]
 ducat dups --dirs [-d FILE]... [PATH]... [--threshold PERCENT] [--names] [--min-files N] [--limit N]
@@ -138,6 +139,11 @@ shows its contents without storing them; Refresh (F5) there stores them.
 Options > Read Archives When Scanning makes the GUI's scans store archives as
 `scan -a` does. The database format "ducat 2" for this reads older databases
 and marks them as format 2 when they are written.
+
+Stored contents can be removed again to make the database smaller, the
+archives staying as files: `ducat strip [PATH]` removes them below `PATH`, or
+in the whole database, and compacts it; in the GUI, File > Remove Archive
+Contents Here does so below the shown folder.
 
 ### Databases
 

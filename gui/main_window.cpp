@@ -25,6 +25,7 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QProgressBar>
 #include <QSettings>
 #include <QStatusBar>
@@ -94,6 +95,11 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     refresh_action_->setShortcut(QKeySequence::Refresh);
     refresh_action_->setToolTip(tr("Scan the shown directory again, or store the archive read "
                                    "from disk (F5)"));
+
+    strip_action_ = file_menu->addAction(tr("Remove Archive &Contents Here…"), this,
+                                         &MainWindow::strip_archives);
+    strip_action_->setToolTip(tr("Remove the stored contents of the archives below the shown "
+                                 "folder to make the database smaller"));
 
     file_menu->addSeparator();
     database_action_ = file_menu->addAction(icon("document-open", QStyle::SP_DialogOpenButton),
@@ -338,6 +344,59 @@ void MainWindow::refresh()
     start_scan(current_);
 }
 
+void MainWindow::strip_archives()
+{
+    if (current_.empty())
+        return;
+    if (scan_thread_.joinable()) {
+        show_error(tr("Wait for the scan to end"));
+        return;
+    }
+    if ((live_ && (current_ == live_->path || is_inside(current_, live_->path)))
+        || inside_contents(current_)) {
+        show_error(tr("Go to a folder outside the archive first"));
+        return;
+    }
+    const auto answer = QMessageBox::question(
+        this, tr("Remove Archive Contents"),
+        tr("Remove the stored contents of the archives below %1?\n\nThe archives stay listed "
+           "as files; a scan that reads archives stores their contents again.")
+            .arg(to_qstring(current_)));
+    if (answer != QMessageBox::Yes)
+        return;
+
+    std::size_t count = 0;
+    std::uint64_t before = 0;
+    std::uint64_t after = 0;
+    {
+        const std::unique_lock lock(database_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            show_error(tr("The database is being written; try again in a moment"));
+            return;
+        }
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        try {
+            ducat::Database db(database_, ducat::Database::Mode::write);
+            count = db.remove_contents_below(current_);
+            before = db.file_size();
+            db.compact(true);
+            after = db.file_size();
+            db.close();
+        } catch (const ducat::DatabaseError& e) {
+            QApplication::restoreOverrideCursor();
+            show_error(QString::fromUtf8(e.what()));
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+    }
+    open_directory(current_, selected_name());
+    statusBar()->showMessage(tr("Removed the stored contents of %1 archives; the database: %2 "
+                                "→ %3")
+                                 .arg(count)
+                                 .arg(to_qstring(ducat::format_size(before)),
+                                      to_qstring(ducat::format_size(after))));
+}
+
 void MainWindow::store_live_archive()
 {
     if (scan_thread_.joinable()) {
@@ -420,6 +479,7 @@ void MainWindow::start_scan(const std::string& path)
     scan_action_->setEnabled(false);
     one_file_system_action_->setEnabled(false);
     archives_action_->setEnabled(false);
+    strip_action_->setEnabled(false);
     database_action_->setEnabled(false);
     progress_label_->show();
     progress_bar_->show();
@@ -513,6 +573,7 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
     scan_action_->setEnabled(true);
     one_file_system_action_->setEnabled(true);
     archives_action_->setEnabled(Plugins::instance().archive() != nullptr);
+    strip_action_->setEnabled(true);
     database_action_->setEnabled(true);
 
     if (outcome.cancelled) {

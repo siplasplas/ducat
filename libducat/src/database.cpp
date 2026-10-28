@@ -366,6 +366,42 @@ void Database::remove_contents(std::string_view path)
     });
 }
 
+std::size_t Database::remove_contents_below(std::string_view path)
+{
+    const std::string root = normalize_path(path);
+    std::vector<std::string> files;
+    if (root != "/") {
+        const auto [dir, name] = split_path(root);
+        modify_entry(dir, name, [&](Node& entry) {
+            if (entry.has_contents)
+                files.push_back(root);
+            return false;
+        });
+    }
+    if (files.empty() && read_directory(root)) {
+        // Contents hold no files with contents themselves, so the walk only
+        // follows directories.
+        std::vector<std::string> stack{root};
+        while (!stack.empty()) {
+            const std::string dir = std::move(stack.back());
+            stack.pop_back();
+            const std::optional<Node> node = load_directory(dir);
+            if (!node)
+                continue;
+            for (const Node& entry : node->children) {
+                const std::string entry_path = join_path(dir, entry.name);
+                if (entry.is_dir)
+                    stack.push_back(entry_path);
+                else if (entry.has_contents)
+                    files.push_back(entry_path);
+            }
+        }
+    }
+    for (const std::string& file : files)
+        remove_contents(file);
+    return files.size();
+}
+
 // Applies `modify` to the entry `name` of the stored directory `dir` and,
 // when it returns true, writes the record holding the entry back: the main
 // record or one segment. The entry must keep its name. Returns false when

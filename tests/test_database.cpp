@@ -535,6 +535,45 @@ void test_contents()
     CHECK_EQ(db.read_directory(root.string())->dir.files, scan.root.files);
 }
 
+void test_remove_contents_below()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    for (const fs::path& file : {root / "a.zip", root / "sub" / "b.zip", root / "sub" / "deep" / "c.zip",
+                                 root / "sub-2" / "d.zip"})
+        write_file(file, 1000);
+    const fs::path inside = temp.path() / "inside";
+    fs::create_directories(inside);
+    write_file(inside / "x.txt", 10);
+    const ducat::ScanResult contents = ducat::scan_tree(inside.string());
+
+    ducat::Database db((temp.path() / "test.ducat").string(), ducat::Database::Mode::write);
+    db.store(ducat::scan_tree(root.string()));
+    const auto all = {root / "a.zip", root / "sub" / "b.zip", root / "sub" / "deep" / "c.zip",
+                      root / "sub-2" / "d.zip"};
+    for (const fs::path& file : all)
+        db.store_contents(file.string(), contents.root);
+    const auto stored = [&](const fs::path& file) {
+        return db.read_directory(file.string()).has_value();
+    };
+
+    // Only below "sub", not in its sibling "sub-2" nor above.
+    CHECK_EQ(db.remove_contents_below((root / "sub").string()), 2u);
+    CHECK(!stored(root / "sub" / "b.zip") && !stored(root / "sub" / "deep" / "c.zip"));
+    CHECK(stored(root / "a.zip") && stored(root / "sub-2" / "d.zip"));
+    CHECK_EQ(db.remove_contents_below((root / "sub").string()), 0u);
+
+    // An archive itself, then the rest.
+    CHECK_EQ(db.remove_contents_below((root / "a.zip").string()), 1u);
+    CHECK(!stored(root / "a.zip"));
+    CHECK_EQ(db.remove_contents_below(root.string()), 1u);
+    CHECK(!stored(root / "sub-2" / "d.zip"));
+    const std::optional<ducat::Node> dir = db.load_directory((root / "sub-2").string());
+    const ducat::Node* d = dir ? find_child(*dir, "d.zip") : nullptr;
+    CHECK(d && !d->has_contents); // the archive stays, as a file
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -561,6 +600,7 @@ int main()
     test_database_path_from_argument();
     test_older_format();
     test_contents();
+    test_remove_contents_below();
     test_open_errors();
     return check::result();
 }

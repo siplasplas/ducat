@@ -79,6 +79,11 @@ public:
     // Removes the stored contents of the file at `path` and the mark.
     void remove_contents(std::string_view path);
 
+    // Removes the stored contents of all files below the stored directory
+    // `path`, or of `path` itself when it is such a file, e.g. to make the
+    // database smaller; the files stay. Returns how many files had contents.
+    std::size_t remove_contents_below(std::string_view path);
+
     // Reads the main record of a directory: its data, entry and segment
     // counts and the first page of entries. Returns nullopt when the
     // directory is not in the database.

@@ -33,6 +33,7 @@ void print_usage(std::ostream& out)
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
            "       ducat compact [-d FILE]\n"
+           "       ducat strip [-d FILE] [PATH]\n"
            "       ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]\n"
            "       ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]\n"
            "       ducat dups --dirs [-d FILE]... [PATH]... [--threshold PERCENT] [--names]\n"
@@ -52,6 +53,9 @@ void print_usage(std::ostream& out)
            "  trees          List the stored trees with their disk usage\n"
            "  compact        Rebuild the database file to give back unused space;\n"
            "                 scan does this by itself when the file has grown much\n"
+           "  strip [PATH]   Remove the stored contents of the archives below PATH, or\n"
+           "                 in the whole database, which then is compacted; the\n"
+           "                 archives stay as files\n"
            "  find [PATH]... Search the stored entries below the PATHs, or in all stored\n"
            "                 trees, without scanning; see Find criteria below\n"
            "  dups [PATH]... List probable duplicate files: same name and size, with\n"
@@ -574,6 +578,42 @@ int run_dups(int argc, char* argv[], int first)
     return 0;
 }
 
+int run_strip(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, false, line))
+        return 2;
+    // Write mode creates a missing file; do not leave an empty one behind.
+    if (!std::filesystem::exists(line.database)) {
+        std::cerr << "ducat: " << line.database << ": no such database\n";
+        return 1;
+    }
+    ducat::Database db(line.database, ducat::Database::Mode::write);
+    std::vector<std::string> paths;
+    if (line.path.empty()) {
+        paths = db.roots();
+    } else {
+        const std::string path = ducat::resolve_path(line.path);
+        // A path holding stored trees, e.g. a mount directory, stands for them.
+        if (!ducat::covers_stored_trees(db, path)) {
+            std::cerr << "ducat: " << path << ": not in the database\n";
+            return 1;
+        }
+        paths = ducat::scope_roots({&db, {path}});
+    }
+    std::size_t count = 0;
+    for (const std::string& path : paths)
+        count += db.remove_contents_below(path);
+    const std::uint64_t before = db.file_size();
+    db.compact(true);
+    const std::uint64_t after = db.file_size();
+    db.close();
+    std::printf("removed the stored contents of %zu archives; %s: %s -> %s\n", count,
+                line.database.c_str(), ducat::format_size(before).c_str(),
+                ducat::format_size(after).c_str());
+    return 0;
+}
+
 int run_compact(int argc, char* argv[], int first)
 {
     CommandLine line;
@@ -627,6 +667,8 @@ int main(int argc, char* argv[])
             return run_trees(argc, argv, 2);
         if (arg == "compact")
             return run_compact(argc, argv, 2);
+        if (arg == "strip")
+            return run_strip(argc, argv, 2);
         if (arg == "find")
             return run_find(argc, argv, 2);
         if (arg == "dups")
