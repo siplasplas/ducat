@@ -98,7 +98,8 @@ sizes only, without reading the files:
   out when `A` and `B` pair. Pairs are sorted by the disk usage of the smaller
   directory.
 
-On `/usr` (870,000 entries) either takes about half a second.
+On `/usr` (870,000 entries) either takes about 0.4 s and some 100 MB of
+memory.
 
 ### Databases
 

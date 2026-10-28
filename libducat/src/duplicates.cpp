@@ -4,33 +4,20 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <functional>
 #include <optional>
-#include <unordered_map>
 #include <unordered_set>
 
 namespace ducat {
 
 namespace {
 
-// The stored trees in memory: directories in depth-first order, so that a
-// directory comes before everything inside it.
-struct File {
-    std::string name;
-    std::uint64_t size = 0;
-    std::uint64_t disk = 0;
-    std::int64_t modified = 0;
-    bool counted_elsewhere = false; // a hard link whose data counts elsewhere
-};
-
-struct Dir {
-    std::string path;
-    int parent = -1;
-    std::uint64_t total_disk = 0;
-    std::vector<File> files;
-    std::vector<int> children;
-};
-
-std::vector<Dir> load_trees(Database& db, std::string_view root)
+// Calls visit(index, parent, path, dir) for each stored directory below
+// `root`, or below all stored trees when it is empty, depth first: a
+// directory comes before everything inside it and gets the next index.
+// Only one directory is in memory at a time.
+template <typename Visit>
+void walk_trees(Database& db, std::string_view root, Visit visit)
 {
     std::vector<std::string> roots;
     if (root.empty()) {
@@ -42,38 +29,55 @@ std::vector<Dir> load_trees(Database& db, std::string_view root)
         roots.push_back(std::move(normalized));
     }
 
-    std::vector<Dir> dirs;
-    // (path, parent index), visited in depth-first order.
-    std::vector<std::pair<std::string, int>> stack;
+    std::vector<std::pair<std::string, int>> stack; // path, parent index
     for (auto it = roots.rbegin(); it != roots.rend(); ++it)
         stack.emplace_back(*it, -1);
+    int next = 0;
+    std::vector<std::string> subdirs;
     while (!stack.empty()) {
         auto [path, parent] = std::move(stack.back());
         stack.pop_back();
-        std::optional<Node> node = db.load_directory(path);
-        if (!node)
+        const std::optional<Node> dir = db.load_directory(path);
+        if (!dir)
             continue;
-        const int index = static_cast<int>(dirs.size());
-        Dir& dir = dirs.emplace_back();
-        dir.path = path;
-        dir.parent = parent;
-        dir.total_disk = node->total_disk;
-        if (parent >= 0)
-            dirs[static_cast<std::size_t>(parent)].children.push_back(index);
-        std::vector<std::string> subdirs;
-        for (Node& entry : node->children) {
-            if (entry.is_dir) {
+        const int index = next++;
+        visit(index, parent, path, *dir);
+        subdirs.clear();
+        for (const Node& entry : dir->children) {
+            if (entry.is_dir)
                 subdirs.push_back(join_path(path, entry.name));
-                continue;
-            }
-            const bool elsewhere = entry.total_disk != entry.disk || entry.total_size != entry.size;
-            dirs.back().files.push_back(
-                {std::move(entry.name), entry.size, entry.disk, entry.modified, elsewhere});
         }
         for (auto sub = subdirs.rbegin(); sub != subdirs.rend(); ++sub)
             stack.emplace_back(std::move(*sub), index);
     }
-    return dirs;
+}
+
+// A hard link whose data is counted at another link.
+bool counted_elsewhere(const Node& entry)
+{
+    return entry.total_disk != entry.disk || entry.total_size != entry.size;
+}
+
+// The key of a file: its name, then optionally its size and time.
+std::string file_key(const Node& file, bool with_size, bool with_time)
+{
+    std::string key = file.name;
+    if (with_size) {
+        key += '\0';
+        key += std::to_string(file.size);
+    }
+    if (with_time) {
+        key += '\0';
+        key += std::to_string(file.modified);
+    }
+    return key;
+}
+
+// Keys are kept as 64-bit hashes rather than strings, which would take most
+// of the memory for a large tree.
+std::uint64_t key_hash(const std::string& key)
+{
+    return std::hash<std::string>{}(key);
 }
 
 bool is_inside(const std::string& path, const std::string& dir)
@@ -82,11 +86,8 @@ bool is_inside(const std::string& path, const std::string& dir)
                       : path.size() > dir.size() && path.starts_with(dir) && path[dir.size()] == '/';
 }
 
-// Elements of a directory's set, ascending: each file below it as a key and
-// the number of earlier files with that key, so that multisets become sets.
-using ElementSet = std::vector<std::uint32_t>;
-
-std::uint64_t overlap(const ElementSet& a, const ElementSet& b)
+// The size of the intersection of two sorted multisets.
+std::uint64_t overlap(const std::vector<std::uint32_t>& a, const std::vector<std::uint32_t>& b)
 {
     std::uint64_t count = 0;
     auto i = a.begin();
@@ -110,41 +111,64 @@ std::uint64_t overlap(const ElementSet& a, const ElementSet& b)
 std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_view root,
                                                      const DuplicateFileOptions& options)
 {
-    const std::vector<Dir> dirs = load_trees(db, root);
-
-    struct Copy {
-        const Dir* dir;
-        const File* file;
+    const auto counted = [&](const Node& entry) {
+        return !entry.is_dir && !counted_elsewhere(entry) && entry.size >= options.min_size;
     };
-    std::unordered_map<std::string, std::vector<Copy>> by_key;
-    for (const Dir& dir : dirs) {
-        for (const File& file : dir.files) {
-            if (file.counted_elsewhere || file.size < options.min_size)
-                continue;
-            std::string key = file.name;
-            key += '\0';
-            key += std::to_string(file.size);
-            if (options.same_time) {
-                key += '\0';
-                key += std::to_string(file.modified);
-            }
-            by_key[std::move(key)].push_back({&dir, &file});
+
+    // First pass: the hashes of all keys, and those seen more than once.
+    std::vector<std::uint64_t> hashes;
+    walk_trees(db, root, [&](int, int, const std::string&, const Node& dir) {
+        for (const Node& entry : dir.children) {
+            if (counted(entry))
+                hashes.push_back(key_hash(file_key(entry, true, options.same_time)));
         }
+    });
+    std::sort(hashes.begin(), hashes.end());
+    std::vector<std::uint64_t> repeated;
+    for (std::size_t i = 1; i < hashes.size(); ++i) {
+        if (hashes[i] == hashes[i - 1] && (repeated.empty() || repeated.back() != hashes[i]))
+            repeated.push_back(hashes[i]);
     }
+    std::vector<std::uint64_t>().swap(hashes);
+
+    // Second pass: the files whose hash repeats, grouped by the exact key,
+    // so that a hash collision groups nothing wrongly.
+    struct Candidate {
+        std::string key;
+        std::string path;
+        std::uint64_t size;
+        std::uint64_t disk;
+    };
+    std::vector<Candidate> candidates;
+    walk_trees(db, root, [&](int, int, const std::string& path, const Node& dir) {
+        for (const Node& entry : dir.children) {
+            if (!counted(entry))
+                continue;
+            std::string key = file_key(entry, true, options.same_time);
+            if (std::binary_search(repeated.begin(), repeated.end(), key_hash(key)))
+                candidates.push_back(
+                    {std::move(key), join_path(path, entry.name), entry.size, entry.disk});
+        }
+    });
+    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
+        return a.key != b.key ? a.key < b.key : a.path < b.path;
+    });
 
     std::vector<DuplicateFileGroup> groups;
-    for (const auto& [key, copies] : by_key) {
-        if (copies.size() < 2)
-            continue;
-        DuplicateFileGroup& group = groups.emplace_back();
-        group.name = copies.front().file->name;
-        group.size = copies.front().file->size;
-        group.disk = 0;
-        for (const Copy& copy : copies) {
-            group.disk = std::max(group.disk, copy.file->disk);
-            group.paths.push_back(join_path(copy.dir->path, copy.file->name));
+    for (std::size_t i = 0; i < candidates.size();) {
+        std::size_t end = i + 1;
+        while (end < candidates.size() && candidates[end].key == candidates[i].key)
+            ++end;
+        if (end - i >= 2) {
+            DuplicateFileGroup& group = groups.emplace_back();
+            group.name = candidates[i].key.substr(0, candidates[i].key.find('\0'));
+            group.size = candidates[i].size;
+            for (std::size_t j = i; j < end; ++j) {
+                group.disk = std::max(group.disk, candidates[j].disk);
+                group.paths.push_back(std::move(candidates[j].path));
+            }
         }
-        std::sort(group.paths.begin(), group.paths.end());
+        i = end;
     }
     std::sort(groups.begin(), groups.end(), [](const auto& a, const auto& b) {
         if (a.wasted() != b.wasted())
@@ -157,31 +181,46 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
 std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view root,
                                                   const DuplicateDirOptions& options)
 {
-    const std::vector<Dir> dirs = load_trees(db, root);
-    const std::size_t count = dirs.size();
     const std::uint64_t percent = std::clamp(options.threshold, 1u, 100u);
 
-    // Key ids for name (and size), numbered later by how rare they are.
-    std::unordered_map<std::string, std::uint32_t> key_ids;
-    std::vector<std::uint64_t> frequency;
-    std::vector<std::vector<std::uint32_t>> own_keys(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        for (const File& file : dirs[i].files) {
-            std::string key = file.name;
-            if (!options.names_only) {
-                key += '\0';
-                key += std::to_string(file.size);
-            }
-            const auto [it, added] =
-                key_ids.emplace(std::move(key), static_cast<std::uint32_t>(frequency.size()));
-            if (added)
-                frequency.push_back(0);
-            ++frequency[it->second];
-            own_keys[i].push_back(it->second);
+    // The directories, and the key hashes of the files directly in each one:
+    // those of dir i are hashes[first_file[i]] .. hashes[first_file[i + 1]].
+    struct Dir {
+        std::string path;
+        int parent;
+        std::uint64_t total_disk;
+        std::vector<int> children;
+    };
+    std::vector<Dir> dirs;
+    std::vector<std::uint64_t> hashes;
+    std::vector<std::size_t> first_file;
+    walk_trees(db, root, [&](int index, int parent, const std::string& path, const Node& dir) {
+        dirs.push_back({path, parent, dir.total_disk, {}});
+        if (parent >= 0)
+            dirs[static_cast<std::size_t>(parent)].children.push_back(index);
+        first_file.push_back(hashes.size());
+        for (const Node& entry : dir.children) {
+            if (!entry.is_dir)
+                hashes.push_back(key_hash(file_key(entry, !options.names_only, false)));
         }
-    }
+    });
+    first_file.push_back(hashes.size());
+    const std::size_t count = dirs.size();
 
-    // Rare keys first: they make short candidate lists (prefix filtering).
+    // Key ids by hash, numbered by how rare the key is: rare keys first make
+    // short candidate lists (prefix filtering).
+    std::vector<std::uint64_t> keys = hashes;
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    std::vector<std::uint32_t> ids(hashes.size());
+    std::vector<std::uint32_t> frequency(keys.size(), 0);
+    for (std::size_t i = 0; i < hashes.size(); ++i) {
+        ids[i] = static_cast<std::uint32_t>(
+            std::lower_bound(keys.begin(), keys.end(), hashes[i]) - keys.begin());
+        ++frequency[ids[i]];
+    }
+    std::vector<std::uint64_t>().swap(hashes);
+    std::vector<std::uint64_t>().swap(keys);
     std::vector<std::uint32_t> by_rarity(frequency.size());
     for (std::uint32_t k = 0; k < by_rarity.size(); ++k)
         by_rarity[k] = k;
@@ -191,54 +230,34 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
     std::vector<std::uint32_t> rank(frequency.size());
     for (std::uint32_t r = 0; r < by_rarity.size(); ++r)
         rank[by_rarity[r]] = r;
+    std::vector<std::uint32_t>().swap(by_rarity);
+    std::vector<std::uint32_t>().swap(frequency);
 
-    // The keys of all files below each directory, sorted by rank; children
-    // come after their parent, so they are done first.
-    std::vector<std::vector<std::uint32_t>> keys(count);
+    // For each directory, the ranks of all files below it as a sorted
+    // multiset; children come after their parent, so they are done first.
+    std::vector<std::vector<std::uint32_t>> sets(count);
     for (std::size_t i = count; i-- > 0;) {
-        std::vector<std::uint32_t>& own = keys[i];
-        for (const std::uint32_t k : own_keys[i])
-            own.push_back(rank[k]);
+        std::vector<std::uint32_t>& set = sets[i];
+        std::size_t size = first_file[i + 1] - first_file[i];
+        for (const int child : dirs[i].children)
+            size += sets[static_cast<std::size_t>(child)].size();
+        set.reserve(size);
+        for (std::size_t f = first_file[i]; f < first_file[i + 1]; ++f)
+            set.push_back(rank[ids[f]]);
         for (const int child : dirs[i].children) {
-            const auto& sub = keys[static_cast<std::size_t>(child)];
-            own.insert(own.end(), sub.begin(), sub.end());
+            const auto& sub = sets[static_cast<std::size_t>(child)];
+            set.insert(set.end(), sub.begin(), sub.end());
         }
-        std::sort(own.begin(), own.end());
+        std::sort(set.begin(), set.end());
     }
-    own_keys.clear();
+    std::vector<std::uint32_t>().swap(ids);
+    std::vector<std::size_t>().swap(first_file);
 
-    // Elements: key rank and occurrence, numbered so that sets stay sorted.
-    std::vector<std::uint32_t> most(frequency.size(), 0);
-    for (const auto& set : keys) {
-        for (std::size_t j = 0; j < set.size();) {
-            std::size_t end = j;
-            while (end < set.size() && set[end] == set[j])
-                ++end;
-            most[set[j]] = std::max(most[set[j]], static_cast<std::uint32_t>(end - j));
-            j = end;
-        }
-    }
-    std::vector<std::uint32_t> base(frequency.size(), 0);
-    std::uint32_t elements = 0;
-    for (std::uint32_t r = 0; r < base.size(); ++r) {
-        base[r] = elements;
-        elements += most[r];
-    }
-    std::vector<ElementSet> sets(count);
-    for (std::size_t i = 0; i < count; ++i) {
-        ElementSet& set = sets[i];
-        set.reserve(keys[i].size());
-        std::uint32_t occurrence = 0;
-        for (std::size_t j = 0; j < keys[i].size(); ++j) {
-            occurrence = j > 0 && keys[i][j] == keys[i][j - 1] ? occurrence + 1 : 0;
-            set.push_back(base[keys[i][j]] + occurrence);
-        }
-        std::vector<std::uint32_t>().swap(keys[i]);
-    }
-
-    // Prefix filtering: with overlap >= alpha, two sets share an element
-    // among their first |S| - alpha + 1 elements. Smaller sets are indexed
-    // first and probed by the larger ones.
+    // Prefix filtering. Elements are the pairs (rank, occurrence of that rank
+    // in the set), which make the multisets sets, in the order of the sorted
+    // vectors. With overlap >= alpha, two sets share an element among their
+    // first |S| - alpha + 1. Smaller sets are indexed first and probed by
+    // the larger ones; the index lists (occurrence, directory) by rank.
     const auto alpha = [&](std::uint64_t size) { return (percent * size + 99) / 100; };
     std::vector<int> order;
     for (std::size_t i = 0; i < count; ++i) {
@@ -248,7 +267,8 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
     std::stable_sort(order.begin(), order.end(),
                      [&](int a, int b) { return sets[a].size() < sets[b].size(); });
 
-    std::vector<std::vector<int>> index(elements);
+    std::vector<std::vector<std::pair<std::uint32_t, int>>> index(rank.size());
+    std::vector<std::uint32_t>().swap(rank);
     std::vector<int> seen(count, -1);
     struct Found {
         int larger;
@@ -257,15 +277,17 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
     };
     std::vector<Found> found;
     for (const int a : order) {
-        const ElementSet& set_a = sets[static_cast<std::size_t>(a)];
+        const std::vector<std::uint32_t>& set_a = sets[static_cast<std::size_t>(a)];
         const std::uint64_t size_a = set_a.size();
         const std::uint64_t prefix = size_a - alpha(size_a) + 1;
+        std::uint32_t occurrence = 0;
         for (std::uint64_t p = 0; p < prefix; ++p) {
-            for (const int b : index[set_a[p]]) {
-                if (seen[static_cast<std::size_t>(b)] == a)
+            occurrence = p > 0 && set_a[p] == set_a[p - 1] ? occurrence + 1 : 0;
+            for (const auto& [other_occurrence, b] : index[set_a[p]]) {
+                if (other_occurrence != occurrence || seen[static_cast<std::size_t>(b)] == a)
                     continue;
                 seen[static_cast<std::size_t>(b)] = a;
-                const ElementSet& set_b = sets[static_cast<std::size_t>(b)];
+                const std::vector<std::uint32_t>& set_b = sets[static_cast<std::size_t>(b)];
                 // |B| <= |A|; the larger one sets the bar.
                 if (set_b.size() * 100 < percent * size_a)
                     continue;
@@ -278,8 +300,11 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
                     found.push_back({a, b, shared});
             }
         }
-        for (std::uint64_t p = 0; p < prefix; ++p)
-            index[set_a[p]].push_back(a);
+        occurrence = 0;
+        for (std::uint64_t p = 0; p < prefix; ++p) {
+            occurrence = p > 0 && set_a[p] == set_a[p - 1] ? occurrence + 1 : 0;
+            index[set_a[p]].emplace_back(occurrence, a);
+        }
     }
 
     // Only the topmost pairs: none inside another found pair.

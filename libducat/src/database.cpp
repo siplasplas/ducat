@@ -123,8 +123,15 @@ Database::Database(const std::string& file, Mode mode)
                                        : ": not a ducat database"));
     }
 
+    // Reading walks the records rather than revisiting them, so a small page
+    // cache does: Tkrzw's default of 10,000 pages of 8 KiB would keep a whole
+    // database of /usr in memory. Writing keeps the default.
+    tkrzw::TreeDBM::TuningParameters tuning;
+    if (!writable)
+        tuning.max_cached_pages = 1024;
     const tkrzw::Status status = dbm_->OpenAdvanced(
-        file, writable, writable ? tkrzw::File::OPEN_DEFAULT : tkrzw::File::OPEN_NO_CREATE);
+        file, writable, writable ? tkrzw::File::OPEN_DEFAULT : tkrzw::File::OPEN_NO_CREATE,
+        tuning);
     if (!status.IsOK())
         fail(file_, "cannot open", status);
     if (claim)
