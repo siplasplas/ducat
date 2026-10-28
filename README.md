@@ -53,8 +53,9 @@ inside another stored tree, with their disk usage and size.
 
 The database file does not reuse the space of replaced records by itself, so
 `scan` (and the GUI) rebuilds it when the records take over twice the space
-they need; for a scan of `/usr` this takes some 25 ms. `compact` rebuilds it
-at once and prints the file size before and after.
+they need; for a scan of `/usr` this takes some 0.1 s. `compact` rebuilds it
+at once and prints the file size before and after; it also compresses a
+database made before ducat compressed them.
 
 `find` searches the stored entries below `PATH`, or in all stored trees,
 without touching the disk. All given criteria must hold:
@@ -243,6 +244,12 @@ build directory, which needs network access once. To use the system library
 instead, configure with `-DDUCAT_SYSTEM_TKRZW=ON`; configuration then checks
 that it can remove records, which the Ubuntu package `libtkrzw-dev` 1.0.32
 cannot.
+
+The database is compressed with Zstandard (`sudo apt install libzstd-dev`),
+which makes it some 2.4 times smaller (14 MiB instead of 33 MiB for `/usr`)
+and costs a few hundredths of a second for scanning or searching it. Without
+libzstd the build warns and makes uncompressed databases; such a build cannot
+read compressed ones.
 
 The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
 (`sudo apt install qt6-base-dev`); `-DDUCAT_BUILD_GUI=OFF` skips it.

@@ -2,6 +2,7 @@
 
 #include "ducat/path.hpp"
 
+#include <tkrzw_compress.h>
 #include <tkrzw_dbm_tree.h>
 
 #include <algorithm>
@@ -27,6 +28,15 @@ constexpr std::string_view format_value = "ducat 2";
 // Format 2 adds stored contents of files (record::flag_contents) to format 1,
 // which it can read; writing to such a database marks it as format 2.
 constexpr std::string_view older_format_value = "ducat 1";
+
+// Zstandard for new and rebuilt databases when Tkrzw has it; otherwise a
+// rebuild keeps the compression the file has. A file names its compression,
+// so either kind is read the same way.
+tkrzw::HashDBM::RecordCompressionMode record_compression()
+{
+    return tkrzw::ZStdCompressor().IsSupported() ? tkrzw::HashDBM::RECORD_COMP_ZSTD
+                                                 : tkrzw::HashDBM::RECORD_COMP_DEFAULT;
+}
 
 [[noreturn]] void fail(const std::string& file, std::string_view what, const tkrzw::Status& status)
 {
@@ -135,6 +145,7 @@ Database::Database(const std::string& file, Mode mode)
     tkrzw::TreeDBM::TuningParameters tuning;
     if (!writable)
         tuning.max_cached_pages = 1024;
+    tuning.record_comp_mode = record_compression(); // only for a new file
     const tkrzw::Status status = dbm_->OpenAdvanced(
         file, writable, writable ? tkrzw::File::OPEN_DEFAULT : tkrzw::File::OPEN_NO_CREATE,
         tuning);
@@ -631,7 +642,10 @@ bool Database::compact(bool force)
     }
     if (!needed)
         return false;
-    const tkrzw::Status status = dbm_->Rebuild();
+    // Rebuilding also compresses a database made without compression.
+    tkrzw::TreeDBM::TuningParameters tuning;
+    tuning.record_comp_mode = record_compression();
+    const tkrzw::Status status = dbm_->RebuildAdvanced(tuning);
     if (!status.IsOK())
         fail(file_, "cannot rebuild", status);
     return true;
