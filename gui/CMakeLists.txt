@@ -3,6 +3,8 @@ add_executable(ducat-gui
     directory_model.hpp
     duplicates_dialog.cpp
     duplicates_dialog.hpp
+    file_operations.cpp
+    file_operations.hpp
     gemini.cpp
     gemini.hpp
     main.cpp

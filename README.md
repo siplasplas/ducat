@@ -196,10 +196,19 @@ All actions are in the menus File, Go, Tools and Options; the toolbar holds
 the frequent ones.
 
 File operations change the disk and keep the database up to date, without
-scanning the whole folder again: New Folder (F7) creates a folder in the
-shown one, and Move to Trash (F8) moves the selected entries (Ctrl or Shift
-with a click selects several) to the desktop's trash, never deleting them for
-good. Both need the shown folder on disk, that is its drive mounted, and work
+scanning the whole folder again. Copy (F5) and Move (F6) ask where to put the
+selected entries (Ctrl or Shift with a click selects several), offering the
+folder used last: into an existing folder, for a single entry also to a new
+path, which renames it, and for several into a new folder, which is created.
+An entry already at the target is overwritten or skipped as answered, once or
+for all; overwriting a folder merges the folders. The work runs with progress
+and can be stopped; copies keep permissions and modification times, and a
+move across file systems copies and then removes only what was copied whole.
+The database is updated for the sources of a move and for the targets, where
+their folders are stored: moving from a scanned USB drive to an unscanned
+home folder removes the entries from the drive's tree only. New Folder (F7)
+creates a folder in the shown one, and Move to Trash (F8) moves the selected
+entries to the desktop's trash, never deleting them for good. All need the shown folder on disk, that is its drive mounted, and work
 neither inside archives nor during a scan. The library function
 `ducat::update_entry` brings one changed path up to date in a database, when
 the folder holding it is stored there.

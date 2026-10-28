@@ -2,6 +2,7 @@
 
 #include "directory_model.hpp"
 #include "duplicates_dialog.hpp"
+#include "file_operations.hpp"
 #include "gemini.hpp"
 #include "plugins.hpp"
 #include "search_dialog.hpp"
@@ -16,6 +17,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QCheckBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -30,6 +32,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressBar>
+#include <QPushButton>
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyle>
@@ -101,7 +104,15 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                                    "from disk (Ctrl+R)"));
 
     file_menu->addSeparator();
-    QAction* new_folder = file_menu->addAction(icon("folder-new", QStyle::SP_FileDialogNewFolder),
+    QAction* copy = file_menu->addAction(icon("edit-copy", QStyle::SP_FileIcon), tr("&Copy…"),
+                                         this, [this] { transfer(TransferKind::copy); });
+    copy->setShortcut(Qt::Key_F5);
+    copy->setToolTip(tr("Copy the selected entries to a folder, or one entry to a new path (F5)"));
+    QAction* move = file_menu->addAction(icon("go-next", QStyle::SP_ArrowForward), tr("&Move…"),
+                                         this, [this] { transfer(TransferKind::move); });
+    move->setShortcut(Qt::Key_F6);
+    move->setToolTip(tr("Move the selected entries to a folder, or rename one entry (F6)"));
+    QAction* new_folder =file_menu->addAction(icon("folder-new", QStyle::SP_FileDialogNewFolder),
                                                tr("&New Folder…"), this, &MainWindow::new_folder);
     new_folder->setShortcut(Qt::Key_F7);
     new_folder->setToolTip(tr("Create a folder in the shown one, on disk and in the database (F7)"));
@@ -529,6 +540,161 @@ void MainWindow::move_to_trash()
                                     static_cast<int>(trashed.size())));
     else
         show_error(tr("Could not move to the trash: %1").arg(failed.join(QStringLiteral(", "))));
+}
+
+std::vector<std::string> MainWindow::selected_names() const
+{
+    std::vector<std::string> names;
+    for (const QModelIndex& index : view_->selectionModel()->selectedRows())
+        names.push_back(model_->entry(index.row()).name);
+    return names;
+}
+
+void MainWindow::transfer(TransferKind kind)
+{
+    if (!check_on_disk())
+        return;
+    const std::vector<std::string> names = selected_names();
+    if (names.empty())
+        return;
+    const bool copying = kind == TransferKind::copy;
+
+    // Offered: the destination used last, while it exists.
+    const QString key = QStringLiteral("files/destination");
+    QString start = QSettings().value(key).toString();
+    if (start.isEmpty() || !QFileInfo(start).isDir())
+        start = to_qstring(current_);
+    const QString label =
+        names.size() == 1
+            ? (copying ? tr("Copy %1 into the folder, or to the new path:")
+                       : tr("Move %1 into the folder, or rename it to the new path:"))
+                  .arg(to_qstring(names[0]))
+            : (copying ? tr("Copy %n entries into the folder:", nullptr, int(names.size()))
+                       : tr("Move %n entries into the folder:", nullptr, int(names.size())));
+    QString typed = ask_destination(this, copying ? tr("Copy") : tr("Move"), label, start);
+    if (typed.isEmpty())
+        return;
+    if (typed == QLatin1String("~") || typed.startsWith(QLatin1String("~/")))
+        typed = QDir::homePath() + typed.mid(1);
+    if (QDir::isRelativePath(typed))
+        typed = QDir(to_qstring(current_)).filePath(typed);
+    const std::string destination = ducat::normalize_path(typed.toStdString());
+
+    // Into an existing folder; one entry also to a new path; several entries
+    // into a new folder, which is created.
+    std::string folder;
+    std::vector<TransferItem> items;
+    const QFileInfo info(to_qstring(destination));
+    std::string created; // the topmost folder made for the destination
+    if (info.isDir()) {
+        folder = destination;
+    } else if (info.exists() || info.isSymLink()) {
+        if (names.size() > 1) {
+            show_error(tr("%1 is not a folder").arg(to_qstring(destination)));
+            return;
+        }
+        folder = parent_of(destination);
+        items.push_back({ducat::join_path(current_, names[0]), destination});
+    } else if (names.size() == 1) {
+        folder = parent_of(destination);
+        if (!QFileInfo(to_qstring(folder)).isDir()) {
+            show_error(tr("The folder %1 does not exist").arg(to_qstring(folder)));
+            return;
+        }
+        items.push_back({ducat::join_path(current_, names[0]), destination});
+    } else {
+        folder = destination;
+        created = destination;
+        while (!QFileInfo::exists(to_qstring(parent_of(created))))
+            created = parent_of(created);
+        if (!QDir().mkpath(to_qstring(destination))) {
+            show_error(tr("Cannot create %1").arg(to_qstring(destination)));
+            return;
+        }
+    }
+    if (items.empty()) {
+        for (const std::string& name : names)
+            items.push_back({ducat::join_path(current_, name), ducat::join_path(folder, name)});
+    }
+
+    // Conflicts are settled before the work starts.
+    std::vector<TransferItem> work;
+    QStringList skipped;
+    std::optional<bool> overwrite_all;
+    for (TransferItem item : items) {
+        if (item.target == item.source || is_inside(item.target, item.source)) {
+            skipped << tr("%1 cannot go into itself").arg(to_qstring(item.source));
+            continue;
+        }
+        const QFileInfo target(to_qstring(item.target));
+        if (target.exists() || target.isSymLink()) {
+            bool overwrite = false;
+            if (overwrite_all) {
+                overwrite = *overwrite_all;
+            } else {
+                QMessageBox box(QMessageBox::Question, copying ? tr("Copy") : tr("Move"),
+                                tr("%1 already exists.").arg(to_qstring(item.target)),
+                                QMessageBox::NoButton, this);
+                box.setInformativeText(target.isDir()
+                                           ? tr("Overwrite merges the folders, replacing the "
+                                                "files of the same names.")
+                                           : tr("Overwrite replaces it."));
+                QPushButton* replace = box.addButton(tr("&Overwrite"), QMessageBox::AcceptRole);
+                QPushButton* skip = box.addButton(tr("&Skip"), QMessageBox::RejectRole);
+                box.addButton(QMessageBox::Cancel);
+                auto* all = new QCheckBox(tr("Do the same for the other conflicts"), &box);
+                box.setCheckBox(all);
+                box.exec();
+                if (box.clickedButton() != replace && box.clickedButton() != skip)
+                    return;
+                overwrite = box.clickedButton() == replace;
+                if (all->isChecked())
+                    overwrite_all = overwrite;
+            }
+            if (!overwrite) {
+                skipped << tr("%1 exists, skipped").arg(to_qstring(item.target));
+                continue;
+            }
+            item.overwrite = true;
+        }
+        work.push_back(std::move(item));
+    }
+    QSettings().setValue(key, to_qstring(folder));
+
+    const TransferResult result = run_transfer(this, kind, work);
+
+    // The database follows: the sources of a move, and the targets, or the
+    // folder made for them.
+    std::vector<std::string> changed;
+    if (!copying) {
+        for (const TransferItem& item : work)
+            changed.push_back(item.source);
+    }
+    if (!created.empty()) {
+        changed.push_back(created);
+    } else {
+        for (const TransferItem& item : work)
+            changed.push_back(item.target);
+    }
+    update_entries(changed);
+    open_directory(current_, copying ? names[0] : std::string());
+
+    QStringList problems = skipped;
+    for (const std::string& error : result.errors)
+        problems << to_qstring(error);
+    QString message = copying ? tr("Copied to %1").arg(to_qstring(folder))
+                              : tr("Moved to %1").arg(to_qstring(folder));
+    if (result.cancelled)
+        message = tr("Stopped; the files done so far stay");
+    if (!problems.isEmpty()) {
+        message += tr("; %n problems", nullptr, static_cast<int>(problems.size()));
+        QMessageBox box(QMessageBox::Warning, copying ? tr("Copy") : tr("Move"),
+                        tr("Not everything was done."), QMessageBox::Ok, this);
+        box.setDetailedText(problems.join(QLatin1Char('\n')));
+        box.setInformativeText(problems.mid(0, 5).join(QLatin1Char('\n')));
+        box.exec();
+    }
+    statusBar()->showMessage(message);
 }
 
 void MainWindow::strip_archives()

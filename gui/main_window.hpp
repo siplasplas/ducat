@@ -1,5 +1,6 @@
 #pragma once
 
+#include "file_operations.hpp"
 #include "scope_selector.hpp"
 
 #include "ducat/database.hpp"
@@ -117,6 +118,9 @@ private:
     // Ctrl+R: scans the shown directory again, or stores the archive read
     // from disk.
     void refresh();
+    // F5, F6: copies or moves the selected entries, asking where to.
+    void transfer(TransferKind kind);
+    std::vector<std::string> selected_names() const;
     // F7: creates a folder in the shown one.
     void new_folder();
     // F8: moves the selected entries to the trash.
