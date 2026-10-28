@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <system_error>
+#include <unordered_map>
 #include <utility>
 
 namespace ducat {
@@ -159,10 +160,82 @@ void Database::close()
 void Database::store(const ScanResult& scan, const Node* parent)
 {
     const std::string root = normalize_path(scan.root.name);
+    std::vector<KeptContents> kept = stored_contents(root);
     remove_tree(root);
     store_directory(scan.root, root);
+    if (!kept.empty())
+        restore_contents(scan.root, root, kept);
     if (root != "/")
         replace_entry(root, &scan.root, parent);
+}
+
+// The contents stored for files below `root`, with each file's size and time
+// then, to be kept for files that did not change.
+std::vector<Database::KeptContents> Database::stored_contents(const std::string& root)
+{
+    std::vector<KeptContents> kept;
+    if (!read_directory(root))
+        return kept;
+    std::vector<std::string> stack{root};
+    while (!stack.empty()) {
+        const std::string dir = std::move(stack.back());
+        stack.pop_back();
+        const std::optional<Node> node = load_directory(dir);
+        if (!node)
+            continue;
+        for (const Node& entry : node->children) {
+            const std::string path = join_path(dir, entry.name);
+            if (entry.is_dir)
+                stack.push_back(path);
+            else if (entry.has_contents)
+                kept.push_back({path, entry.size, entry.modified, load_tree(path)});
+        }
+    }
+    return kept;
+}
+
+// The stored directory at `path` with everything below it.
+Node Database::load_tree(const std::string& path)
+{
+    std::optional<Node> dir = load_directory(path);
+    if (!dir)
+        return {};
+    for (Node& child : dir->children) {
+        if (child.is_dir)
+            child.children = load_tree(join_path(path, child.name)).children;
+    }
+    return std::move(*dir);
+}
+
+// Stores the kept contents again for the files of the new scan with the same
+// size and time that brought no new contents.
+void Database::restore_contents(const Node& root, const std::string& root_path,
+                                const std::vector<KeptContents>& kept)
+{
+    std::unordered_map<std::string, const KeptContents*> by_path;
+    for (const KeptContents& contents : kept)
+        by_path.emplace(contents.path, &contents);
+    std::vector<std::pair<const Node*, std::string>> stack{{&root, root_path}};
+    while (!stack.empty()) {
+        const auto [dir, path] = std::move(stack.back());
+        stack.pop_back();
+        for (const Node& entry : dir->children) {
+            const std::string entry_path = join_path(path, entry.name);
+            if (entry.is_dir) {
+                stack.emplace_back(&entry, entry_path);
+                continue;
+            }
+            const auto found = by_path.find(entry_path);
+            if (found == by_path.end() || entry.has_contents || entry.size != found->second->size
+                || entry.modified != found->second->modified)
+                continue;
+            store_directory(found->second->contents, entry_path);
+            modify_entry(path, entry.name, [](Node& stored) {
+                stored.has_contents = true;
+                return true;
+            });
+        }
+    }
 }
 
 void Database::remove(std::string_view path, const Node* parent)
@@ -179,6 +252,8 @@ void Database::store_directory(const Node& dir, const std::string& path)
     for (const Node& child : dir.children) {
         if (child.is_dir)
             store_directory(child, join_path(path, child.name));
+        else if (child.has_contents && child.children.size() == 1)
+            store_directory(child.children.front(), join_path(path, child.name));
     }
 }
 

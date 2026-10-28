@@ -14,6 +14,8 @@ add_library(libducat
 add_library(ducat::libducat ALIAS libducat)
 
 set_target_properties(libducat PROPERTIES
+    # Also linked into the GUI plugins, which are shared objects.
+    POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME ducat
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}

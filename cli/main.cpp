@@ -1,3 +1,6 @@
+#ifdef DUCAT_HAVE_ARCHIVES
+#include "ducat/archive_reader.hpp"
+#endif
 #include "ducat/database.hpp"
 #include "ducat/duplicates.hpp"
 #include "ducat/format.hpp"
@@ -26,7 +29,7 @@ namespace {
 void print_usage(std::ostream& out)
 {
     out << "Usage: ducat [--help] [--version]\n"
-           "       ducat scan [-x] [-j N] [-d FILE] PATH\n"
+           "       ducat scan [-x] [-j N] [-a] [-d FILE] PATH\n"
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
            "       ducat compact [-d FILE]\n"
@@ -41,7 +44,9 @@ void print_usage(std::ostream& out)
            "  scan PATH      Scan the directory tree at PATH, store it in the database\n"
            "                 and print its totals and entries sorted by disk usage;\n"
            "                 inside a stored tree this refreshes just that branch,\n"
-           "                 and a PATH that no longer exists is removed\n"
+           "                 and a PATH that no longer exists is removed. With -a\n"
+           "                 (--archives) the contents of archives are stored too;\n"
+           "                 those stored before stay for archives that did not change\n"
            "  ls [PATH]      Print a directory from the database, like scan does;\n"
            "                 PATH defaults to the current directory\n"
            "  trees          List the stored trees with their disk usage\n"
@@ -81,6 +86,7 @@ void print_usage(std::ostream& out)
            "  --min-size SIZE        At least SIZE, e.g. 500M or 2G; directories count\n"
            "  --max-size SIZE        At most SIZE   with their contents (disk usage)\n"
            "  --apparent             Compare the logical size instead of disk usage\n"
+           "  -a, --archives         Look also inside archives stored with scan -a\n"
            "  --min-files N          Directories with at least N files inside\n"
            "  --max-files N          Directories with at most N files inside\n"
            "  --newer WHEN           Modified at or after WHEN: YYYY-MM-DD[ HH:MM], or\n"
@@ -134,6 +140,7 @@ void print_directory(const ducat::Node& dir, const std::string& extra)
 struct CommandLine {
     std::string database = ducat::default_database_path();
     ducat::ScanOptions scan;
+    bool archives = false;
     std::string path;
 };
 
@@ -154,6 +161,13 @@ bool parse_options(int argc, char* argv[], int first, bool scan, CommandLine& li
                 return false;
             }
             line.scan.threads = static_cast<unsigned>(threads);
+        } else if (scan && (arg == "-a" || arg == "--archives")) {
+#ifdef DUCAT_HAVE_ARCHIVES
+            line.archives = true;
+#else
+            std::cerr << "ducat: " << arg << ": built without libarchive\n";
+            return false;
+#endif
         } else if (arg == "-d" || arg == "--database") {
             if (i + 1 >= argc) {
                 std::cerr << "ducat: " << arg << " needs a FILE\n";
@@ -190,8 +204,18 @@ int run_scan(int argc, char* argv[], int first)
 
     const auto start = std::chrono::steady_clock::now();
     ducat::RefreshResult result;
+    std::size_t archive_errors = 0;
     try {
-        result = ducat::refresh(db, line.path, line.scan);
+        ducat::PreparedRefresh prepared = ducat::prepare_refresh(line.path, line.scan);
+#ifdef DUCAT_HAVE_ARCHIVES
+        if (line.archives && prepared.scan) {
+            for (const ducat::ArchiveError& error : ducat::read_archives(*prepared.scan)) {
+                std::cerr << "ducat: " << error.path << ": " << error.message << '\n';
+                ++archive_errors;
+            }
+        }
+#endif
+        result = ducat::apply_refresh(db, std::move(prepared));
     } catch (const std::system_error& e) {
         std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
         return 1;
@@ -210,10 +234,10 @@ int run_scan(int argc, char* argv[], int first)
         std::cerr << "ducat: " << error.path << ": " << std::strerror(error.error) << '\n';
 
     char extra[64];
-    std::snprintf(extra, sizeof extra, ", %zu errors, %.2f s", scan.errors.size(),
+    std::snprintf(extra, sizeof extra, ", %zu errors, %.2f s", scan.errors.size() + archive_errors,
                   elapsed.count());
     print_directory(scan.root, extra);
-    return scan.errors.empty() ? 0 : 1;
+    return scan.errors.empty() && archive_errors == 0 ? 0 : 1;
 }
 
 int run_ls(int argc, char* argv[], int first)
@@ -388,6 +412,8 @@ int run_find(int argc, char* argv[], int first)
             }
         } else if (arg == "--apparent") {
             query.apparent_size = true;
+        } else if (arg == "-a" || arg == "--archives") {
+            query.in_contents = true;
         } else if (arg.starts_with('-') && arg != "-") {
             std::cerr << "ducat: unknown option '" << arg << "'\n";
             return 2;

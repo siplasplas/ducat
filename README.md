@@ -11,7 +11,7 @@ refresh one branch of it and list directories from it.
 ## Usage
 
 ```sh
-ducat scan [-x] [-j N] [-d FILE] PATH
+ducat scan [-x] [-j N] [-a] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
@@ -119,12 +119,22 @@ Files whose names show an archive (zip, 7z, rar, tar and compressed tar, cpio,
 iso, cab, deb, rpm) are marked as such. A database can hold the contents of an
 archive under its path, like a folder: `…/photos.zip/2019/img.jpg`. These
 contents take no space of their own, so they are not in the totals of the
-folders above. Find looks into them only with Also inside stored archives, and
-in the GUI Enter on such an archive opens them. A new scan of the folder
-holding the archive replaces its records, the stored contents too. Reading
-archives to store their contents is coming next; the database format "ducat 2"
-for this reads older databases and marks them as format 2 when they are
-written.
+folders above.
+
+`ducat scan -a` (`--archives`) stores the contents of the archives in the
+scanned tree, read with libarchive (`libarchive-dev`; the build leaves the
+option out without it, `-DDUCAT_ARCHIVES=OFF` too). Scanning archives is
+slower, so it is meant for the trees where it matters. A later scan, with or
+without `-a`, keeps the stored contents of archives whose size and time did not
+change. Archives inside archives are listed as plain files. An unreadable
+archive is reported and the scan goes on. Directories missing from an
+archive's list are made up from the paths; an entry's disk usage is its size
+rounded up to 512 bytes.
+
+`ducat find -a` and, in the GUI, Find with Also inside stored archives look
+into stored contents; Enter on such an archive in the GUI opens them. The
+database format "ducat 2" for this reads older databases and marks them as
+format 2 when they are written.
 
 ### Databases
 

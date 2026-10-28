@@ -507,10 +507,32 @@ void test_contents()
     CHECK(refused(root / "big"));
     CHECK(refused(root / "missing.zip"));
 
-    // A new scan of the tree replaces its records, the contents too.
+    // A new scan of the tree keeps the contents of an archive that did not
+    // change, also when refreshing just the folder holding it.
+    db.store(ducat::scan_tree(root.string()));
+    CHECK(entry(root / "a.zip").has_contents);
+    CHECK(db.read_directory((root / "a.zip").string()).has_value());
+    ducat::refresh(db, root.string());
+    CHECK(entry(root / "a.zip").has_contents);
+
+    // A changed archive loses them.
+    write_file(root / "a.zip", 3333);
     db.store(ducat::scan_tree(root.string()));
     CHECK(!entry(root / "a.zip").has_contents);
     CHECK(!db.read_directory((root / "a.zip").string()));
+
+    // A scan may bring contents: the file's only child is their root.
+    ducat::ScanResult scan = ducat::scan_tree(root.string());
+    for (ducat::Node& child : scan.root.children) {
+        if (child.name == "a.zip") {
+            child.has_contents = true;
+            child.children.push_back(contents.root);
+        }
+    }
+    db.store(scan);
+    CHECK(entry(root / "a.zip").has_contents);
+    check_stored(db, contents.root, (root / "a.zip").string());
+    CHECK_EQ(db.read_directory(root.string())->dir.files, scan.root.files);
 }
 
 void test_open_errors()

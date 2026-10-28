@@ -39,8 +39,9 @@ inline int result()
 
 #define CHECK_EQ(a, b)                                                     \
     do {                                                                   \
-        const auto& check_a_ = (a);                                        \
-        const auto& check_b_ = (b);                                        \
+        /* Copies: a reference into a temporary would dangle. */          \
+        const auto check_a_ = (a);                                         \
+        const auto check_b_ = (b);                                         \
         if (!(check_a_ == check_b_))                                       \
             ::check::fail_eq(__FILE__, __LINE__, #a " == " #b, check_a_, check_b_); \
     } while (0)

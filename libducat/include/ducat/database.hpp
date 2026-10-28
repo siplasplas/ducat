@@ -52,6 +52,11 @@ public:
     // `parent`, when given, holds fresh own data of the directory above the
     // root (see stat_directory), which an added or removed entry changes;
     // it replaces the stored size, disk usage and time of that directory.
+    //
+    // A file of the scan with has_contents and one child stores that child,
+    // a directory, as its contents (see store_contents). Contents stored
+    // before for a file with the same size and time in the new scan, which
+    // brings none for it, are kept.
     void store(const ScanResult& scan, const Node* parent = nullptr);
 
     // Removes a directory that no longer exists: its records and those below
@@ -107,6 +112,17 @@ public:
 
 private:
     struct Share;
+    struct KeptContents {
+        std::string path;
+        std::uint64_t size;
+        std::int64_t modified;
+        Node contents;
+    };
+
+    std::vector<KeptContents> stored_contents(const std::string& root);
+    Node load_tree(const std::string& path);
+    void restore_contents(const Node& root, const std::string& root_path,
+                          const std::vector<KeptContents>& kept);
 
     void store_directory(const Node& dir, const std::string& path);
     void write_directory(const Node& dir, const std::string& path,
