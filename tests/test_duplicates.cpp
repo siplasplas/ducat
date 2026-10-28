@@ -147,56 +147,93 @@ std::set<Pair> dir_pairs(ducat::Database& db, const fs::path& root,
     return result;
 }
 
-// The same, by comparing every two directories of the scan by the files
-// directly in them.
+// The same, from every two directories of the scan: pairs similar by the
+// files directly in them, their parents while the names agree, scored by the
+// files shared at any depth through subdirectories of the same names.
 std::set<Pair> brute_force_pairs(const ducat::Node& root, const ducat::DuplicateDirOptions& options)
 {
     struct Dir {
-        std::string path;
-        std::multiset<std::string> keys;
+        std::multiset<std::string> keys; // of the files directly in it
+        std::uint64_t files = 0;         // below it
+        std::set<std::string> subdirs;
     };
-    std::vector<Dir> dirs;
+    std::map<std::string, Dir> dirs; // by path relative to the root
     const auto collect = [&](auto& self, const ducat::Node& node, const std::string& path) -> void {
-        std::multiset<std::string> keys;
+        Dir dir;
+        dir.files = node.files;
         for (const ducat::Node& child : node.children) {
             const std::string child_path = path.empty() ? child.name : path + "/" + child.name;
-            if (child.is_dir)
+            if (child.is_dir) {
+                dir.subdirs.insert(child.name);
                 self(self, child, child_path);
-            else
-                keys.insert(options.names_only ? child.name
-                                               : child.name + "/" + std::to_string(child.size));
+            } else {
+                dir.keys.insert(options.names_only ? child.name
+                                                   : child.name + "/" + std::to_string(child.size));
+            }
         }
         if (!path.empty())
-            dirs.push_back({path, keys});
+            dirs[path] = dir;
     };
     collect(collect, root, "");
 
     const auto inside = [](const std::string& a, const std::string& b) {
         return a.size() > b.size() && a.starts_with(b) && a[b.size()] == '/';
     };
-    std::map<std::pair<std::string, std::string>, unsigned> found;
-    for (const Dir& a : dirs) {
-        for (const Dir& b : dirs) {
-            if (a.path >= b.path || inside(a.path, b.path) || inside(b.path, a.path))
-                continue;
-            const std::size_t larger = std::max(a.keys.size(), b.keys.size());
-            if (std::min(a.keys.size(), b.keys.size()) < std::max<std::uint64_t>(options.min_files, 1))
-                continue;
-            std::vector<std::string> shared;
-            std::set_intersection(a.keys.begin(), a.keys.end(), b.keys.begin(), b.keys.end(),
-                                  std::back_inserter(shared));
-            if (shared.size() * 100 >= options.threshold * larger)
-                found[{a.path, b.path}] = static_cast<unsigned>(shared.size() * 100 / larger);
-        }
-    }
     const auto parent = [](const std::string& path) {
         const std::size_t slash = path.rfind('/');
         return slash == std::string::npos ? std::string() : path.substr(0, slash);
     };
+    const auto name = [](const std::string& path) { return path.substr(path.rfind('/') + 1); };
+    const auto common = [](const std::multiset<std::string>& a, const std::multiset<std::string>& b) {
+        std::vector<std::string> shared;
+        std::set_intersection(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(shared));
+        return shared.size();
+    };
+    const auto shared_below = [&](auto& self, const std::string& x, const std::string& y)
+        -> std::uint64_t {
+        std::uint64_t shared = common(dirs[x].keys, dirs[y].keys);
+        for (const std::string& sub : dirs[x].subdirs) {
+            if (dirs[y].subdirs.count(sub))
+                shared += self(self, x + "/" + sub, y + "/" + sub);
+        }
+        return shared;
+    };
+
+    const std::uint64_t min_files = std::max<std::uint64_t>(options.min_files, 1);
+    std::set<std::pair<std::string, std::string>> candidates;
+    for (const auto& [a, dir_a] : dirs) {
+        for (const auto& [b, dir_b] : dirs) {
+            if (a >= b || inside(a, b) || inside(b, a))
+                continue;
+            const std::size_t larger = std::max(dir_a.keys.size(), dir_b.keys.size());
+            if (std::min(dir_a.keys.size(), dir_b.keys.size()) < min_files
+                || common(dir_a.keys, dir_b.keys) * 100 < options.threshold * larger)
+                continue;
+            for (std::string x = a, y = b;;) {
+                candidates.insert(std::minmax(x, y));
+                const std::string px = parent(x);
+                const std::string py = parent(y);
+                if (name(x) != name(y) || px.empty() || py.empty() || px == py
+                    || inside(px, py) || inside(py, px))
+                    break;
+                x = px;
+                y = py;
+            }
+        }
+    }
+    std::map<std::pair<std::string, std::string>, unsigned> found;
+    for (const auto& [x, y] : candidates) {
+        const std::uint64_t larger = std::max(dirs[x].files, dirs[y].files);
+        if (std::min(dirs[x].files, dirs[y].files) < min_files)
+            continue;
+        const std::uint64_t shared = shared_below(shared_below, x, y);
+        if (shared * 100 >= options.threshold * larger)
+            found[{x, y}] = static_cast<unsigned>(shared * 100 / larger);
+    }
     std::set<Pair> result;
     for (const auto& [names, percent] : found) {
         bool covered = false;
-        for (std::string x = names.first; !x.empty() && !covered; x = parent(x)) {
+        for (std::string x = names.first; !options.nested && !x.empty() && !covered; x = parent(x)) {
             for (std::string y = names.second; !y.empty() && !covered; y = parent(y)) {
                 if (x == names.first && y == names.second)
                     continue;
@@ -218,44 +255,50 @@ void test_dirs()
     const ducat::ScanResult scan = ducat::scan_tree(root.string());
     db.store(scan);
 
-    // Only files directly in a folder count, not those in sub/. photos has
-    // 6 with "empty"; backup/photos 5 (no "empty"), partial 6 (no e.jpg, but
-    // g.jpg). backup holds no files itself; backup/photos and partial share
-    // 4 of 6 (66 %); the sub folders hold 1 file each, under min_files.
+    // Pairs start from the files directly in folders: photos has 6 with
+    // "empty", backup/photos 5 (no "empty"), partial 6 (no e.jpg, but g.jpg),
+    // so both pair with photos at 83 %. Scored with sub/f.jpg, which they
+    // share too, that is 6 of photos' 7 files (85 %). backup holds no files
+    // itself, and climbing from backup/photos stops at different names.
     const std::set<Pair> pairs = dir_pairs(db, root, {});
     CHECK(pairs
-          == (std::set<Pair>{{"backup/photos", "photos", 83u}, {"partial", "photos", 83u}}));
+          == (std::set<Pair>{{"backup/photos", "photos", 85u}, {"partial", "photos", 85u}}));
 
     ducat::DuplicateDirOptions strict;
-    strict.threshold = 84;
+    strict.threshold = 86;
     CHECK(dir_pairs(db, root, strict).empty());
+    // backup/photos and partial share 4 of 6 directly, 5 of 7 with sub.
     ducat::DuplicateDirOptions loose;
     loose.threshold = 60;
-    CHECK(dir_pairs(db, root, loose).count({"backup/photos", "partial", 66u}));
+    CHECK(dir_pairs(db, root, loose).count({"backup/photos", "partial", 71u}));
 
-    // By name, names (5 files, other sizes) matches backup/photos fully.
+    // By name, names (6 files, other sizes) matches backup/photos fully.
     ducat::DuplicateDirOptions by_name;
     by_name.names_only = true;
     CHECK(dir_pairs(db, root, by_name)
           == (std::set<Pair>{{"backup/photos", "names", 100u},
-                             {"backup/photos", "photos", 83u},
-                             {"names", "photos", 83u},
-                             {"partial", "photos", 83u}}));
+                             {"backup/photos", "photos", 85u},
+                             {"names", "photos", 85u},
+                             {"partial", "photos", 85u}}));
 
     // Pruned search and brute force agree.
-    for (const bool names_only : {false, true}) {
+    for (int variant = 0; variant < 4; ++variant) {
+        const bool nested = variant & 1;
+        const bool names_only = variant & 2;
         for (const unsigned threshold : {50u, 60u, 80u, 83u, 84u, 100u}) {
             for (const std::uint64_t min_files : {1u, 5u, 7u}) {
                 ducat::DuplicateDirOptions options;
                 options.names_only = names_only;
                 options.threshold = threshold;
                 options.min_files = min_files;
+                options.nested = nested;
                 const std::set<Pair> got = dir_pairs(db, root, options);
                 const std::set<Pair> expected = brute_force_pairs(scan.root, options);
                 CHECK(got == expected);
                 if (got != expected) {
-                    std::cerr << "    names_only " << names_only << ", threshold " << threshold
-                              << ", min_files " << min_files << '\n';
+                    std::cerr << "    nested " << nested << ", names_only " << names_only
+                              << ", threshold " << threshold << ", min_files " << min_files
+                              << '\n';
                     for (const auto& [a, b, p] : got)
                         std::cerr << "    got      " << a << " | " << b << " " << p << '\n';
                     for (const auto& [a, b, p] : expected)
@@ -316,7 +359,9 @@ void test_scopes()
           && same[0].second.path == photos && same[0].first.scope != same[0].second.scope);
 
     // A repository is no copy of its own .git, which holds most of its files,
-    // also when it is stored in two databases.
+    // also when it is stored in two databases; its copy is, found from the
+    // copies of .git (whose 10 files are directly in it) and listed alone
+    // unless nested pairs are asked for, then before .git.
     const fs::path repo = temp.path() / "repo";
     write_file(repo / "README", 10);
     write_file(repo / "main.cpp", 20);
@@ -326,11 +371,23 @@ void test_scopes()
     const auto repo_again = open("repo-again.ducat");
     repo_home->store(ducat::scan_tree(repo.string()));
     repo_again->store(ducat::scan_tree(repo.string()));
-    const auto repos = ducat::find_duplicate_dirs({{repo_home.get(), {}}, {repo_again.get(), {}}});
+    const std::vector<ducat::Scope> repo_scopes{{repo_home.get(), {}}, {repo_again.get(), {}}};
+    const auto repos = ducat::find_duplicate_dirs(repo_scopes);
     CHECK_EQ(repos.size(), 1u);
-    for (const auto& pair : repos)
-        CHECK(pair.first.path == (repo / ".git").string()
-              && pair.second.path == (repo / ".git").string());
+    if (!repos.empty()) {
+        CHECK(repos[0].first.path == repo.string() && repos[0].second.path == repo.string());
+        CHECK_EQ(repos[0].first_files, 12u);
+        CHECK_EQ(repos[0].similarity, 100u);
+    }
+    ducat::DuplicateDirOptions with_nested;
+    with_nested.nested = true;
+    const auto all_repos = ducat::find_duplicate_dirs(repo_scopes, with_nested);
+    CHECK_EQ(all_repos.size(), 2u);
+    if (all_repos.size() == 2) {
+        CHECK(all_repos[0].first.path == repo.string());
+        CHECK(all_repos[1].first.path == (repo / ".git").string()
+              && all_repos[1].second.path == (repo / ".git").string());
+    }
 
     // A path holding stored trees, like a mount directory, stands for them; a
     // path inside another counts once; one neither stored nor holding stored

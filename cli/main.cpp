@@ -38,7 +38,7 @@ void print_usage(std::ostream& out)
            "       ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]\n"
            "       ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]\n"
            "       ducat dups --dirs [-d FILE]... [PATH]... [--threshold PERCENT] [--names]\n"
-           "                  [--min-files N] [--limit N]\n"
+           "                  [--min-files N] [--nested] [--limit N]\n"
            "\n"
            "Fast disk usage catalog.\n"
            "\n"
@@ -62,11 +62,14 @@ void print_usage(std::ostream& out)
            "  dups [PATH]... List probable duplicate files: same name and size, with\n"
            "                 --time also the same time; files under --min-size (1 B)\n"
            "                 are left out. With --dirs, list directories sharing at\n"
-           "                 least --threshold percent (80) of the files directly in\n"
-           "                 them, not in their subdirectories, counted against the\n"
-           "                 larger one, by name and size or with\n"
-           "                 --names by name only; directories with fewer than\n"
-           "                 --min-files files (5) are left out\n"
+           "                 least --threshold percent (80) of the files below the\n"
+           "                 larger one, by name and size or with --names by name\n"
+           "                 only: found from folders similar by the files directly\n"
+           "                 in them, up through parents of the same names, and\n"
+           "                 counting the files of subfolders of the same names;\n"
+           "                 directories with fewer than --min-files files (5) are\n"
+           "                 left out, and with --nested also pairs inside a listed\n"
+           "                 pair are listed\n"
            "\n"
            "find and dups take several -d and PATHs: every PATH is looked for in every\n"
            "database, e.g. one of a home directory and one of removable drives. A PATH\n"
@@ -503,6 +506,8 @@ int run_dups(int argc, char* argv[], int first)
             file_options.same_time = true;
         } else if (arg == "--names") {
             dir_options.names_only = true;
+        } else if (arg == "--nested") {
+            dir_options.nested = true;
         } else if (arg == "-d" || arg == "--database" || arg == "--min-size"
                    || arg == "--threshold" || arg == "--min-files" || arg == "--limit") {
             if (i + 1 >= argc) {

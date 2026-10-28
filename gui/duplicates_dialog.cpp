@@ -180,13 +180,16 @@ QWidget* DuplicatesDialog::make_folders_tab()
     threshold_->setRange(1, 100);
     threshold_->setValue(80);
     threshold_->setSuffix(QStringLiteral(" %"));
-    threshold_->setToolTip(tr("Files shared, of the files of the folder with more of them, "
-                              "counting only the files directly in the folders"));
+    threshold_->setToolTip(tr("Files shared, of the files below the folder with more of them; "
+                              "subfolders of the same names count with their files"));
     names_only_ = new QCheckBox(tr("Names only, sizes may differ"), tab);
+    nested_ = new QCheckBox(tr("Also pairs inside listed pairs"), tab);
+    nested_->setToolTip(tr("E.g. A/GAG with B/GAG besides A with B; the larger pairs come "
+                           "first"));
     min_files_ = new QSpinBox(tab);
     min_files_->setRange(1, 1000000);
     min_files_->setValue(5);
-    min_files_->setToolTip(tr("Folders with fewer files directly in them are left out"));
+    min_files_->setToolTip(tr("Folders with fewer files below them are left out"));
     auto* find = new QPushButton(tr("Find Folders"), tab);
     connect(find, &QPushButton::clicked, this, &DuplicatesDialog::find_folders);
 
@@ -197,6 +200,7 @@ QWidget* DuplicatesDialog::make_folders_tab()
     options->addWidget(min_files_);
     options->addWidget(new QLabel(tr("files each"), tab));
     options->addWidget(names_only_);
+    options->addWidget(nested_);
     options->addStretch();
     options->addWidget(find);
 
@@ -329,6 +333,7 @@ void DuplicatesDialog::find_folders()
     ducat::DuplicateDirOptions options;
     options.threshold = static_cast<unsigned>(threshold_->value());
     options.names_only = names_only_->isChecked();
+    options.nested = nested_->isChecked();
     options.min_files = static_cast<std::uint64_t>(min_files_->value());
 
     std::vector<ducat::DuplicateDirPair> pairs;

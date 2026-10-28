@@ -78,6 +78,7 @@ private:
 
     QSpinBox* threshold_;
     QCheckBox* names_only_;
+    QCheckBox* nested_;
     QSpinBox* min_files_;
     QStandardItemModel* folders_model_;
     QSortFilterProxyModel* folders_proxy_;

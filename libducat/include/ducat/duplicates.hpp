@@ -53,20 +53,23 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
 
 struct DuplicateDirOptions {
     // Least similarity in percent: the files the two directories share,
-    // divided by the files of the larger one, counting only the files
-    // directly in them, not in their subdirectories.
+    // divided by the files below the larger one (see find_duplicate_dirs).
     unsigned threshold = 80;
     // Compare files by name only, so that they may differ in size.
     bool names_only = false;
-    // Directories with fewer files directly in them are left out.
+    // Directories with fewer files below them are left out, and so are
+    // directories with fewer files directly in them as the starting pairs.
     std::uint64_t min_files = 5;
+    // Also list the pairs inside a listed pair, e.g. A/x with B/x besides
+    // A with B.
+    bool nested = false;
 };
 
 // Two directories holding mostly the same files.
 struct DuplicateDirPair {
     Location first;                    // the larger, by files
     Location second;
-    std::uint64_t first_files = 0;     // files directly in each
+    std::uint64_t first_files = 0;     // files below each, at any depth
     std::uint64_t second_files = 0;
     std::uint64_t shared = 0;          // files in both
     std::uint64_t first_disk = 0;
@@ -75,11 +78,20 @@ struct DuplicateDirPair {
 };
 
 // Finds pairs of similar directories in the scopes, sorted by the disk usage
-// of the smaller directory, largest first. A directory and one inside it, in
-// the same scope, are never paired, and a pair inside a reported pair (A/x
-// with B/x when A and B match) is left out. The same path in two scopes,
-// e.g. an older and a newer database, can pair. Throws DatabaseError as
-// find_duplicate_files does.
+// of the smaller directory, largest first.
+//
+// Pairs start from directories sharing the threshold of the files directly
+// in them, which go up to their parents as long as the two have the same
+// name: from GAG/.git with GAG/.git to GAG with GAG and on. Two directories
+// share the files directly in both and, recursively, those their
+// subdirectories of the same names share; a pair is similar when that is at
+// least the threshold of the files below the larger one. So a repository
+// never pairs with its own .git, which holds most of its files.
+//
+// A directory and one inside it, in the same scope, are never paired, and
+// unless DuplicateDirOptions::nested, a pair inside a listed pair is left
+// out. The same path in two scopes, e.g. an older and a newer database, can
+// pair. Throws DatabaseError as find_duplicate_files does.
 std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scopes,
                                                   const DuplicateDirOptions& options = {});
 

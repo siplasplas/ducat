@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string_view>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace ducat {
@@ -203,13 +205,17 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scop
         std::size_t scope;
         int parent;
         std::uint64_t total_disk;
+        std::uint64_t files;       // below it, at any depth
+        std::vector<int> children; // sorted by name
     };
     std::vector<Dir> dirs;
     std::vector<std::uint64_t> hashes;
     std::vector<std::size_t> first_file;
-    walk_trees(scopes, [&](int, int parent, std::size_t scope, const std::string& path,
+    walk_trees(scopes, [&](int index, int parent, std::size_t scope, const std::string& path,
                            const Node& dir) {
-        dirs.push_back({path, scope, parent, dir.total_disk});
+        dirs.push_back({path, scope, parent, dir.total_disk, dir.files, {}});
+        if (parent >= 0)
+            dirs[static_cast<std::size_t>(parent)].children.push_back(index);
         first_file.push_back(hashes.size());
         for (const Node& entry : dir.children) {
             if (!entry.is_dir)
@@ -258,6 +264,14 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scop
     }
     std::vector<std::uint32_t>().swap(ids);
     std::vector<std::size_t>().swap(first_file);
+    const auto name_of = [&](int i) {
+        const std::string& path = dirs[static_cast<std::size_t>(i)].path;
+        return std::string_view(path).substr(path.rfind('/') + 1);
+    };
+    for (Dir& dir : dirs) {
+        std::sort(dir.children.begin(), dir.children.end(),
+                  [&](int a, int b) { return name_of(a) < name_of(b); });
+    }
 
     // Prefix filtering. Elements are the pairs (rank, occurrence of that rank
     // in the set), which make the multisets sets, in the order of the sorted
@@ -316,30 +330,94 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scop
         }
     }
 
-    // Only the topmost pairs: none inside another found pair.
     const auto pair_key = [](int x, int y) {
         const auto [lo, hi] = std::minmax(x, y);
         return (static_cast<std::uint64_t>(lo) << 32) | static_cast<std::uint32_t>(hi);
     };
-    std::unordered_set<std::uint64_t> pairs;
-    for (const Found& f : found)
-        pairs.insert(pair_key(f.larger, f.smaller));
-    std::vector<DuplicateDirPair> result;
+    const auto at = [&](int i) -> const Dir& { return dirs[static_cast<std::size_t>(i)]; };
+
+    // The files two directories share, at any depth: those directly in both,
+    // and, recursively, those of their subdirectories of the same names.
+    std::unordered_map<std::uint64_t, std::uint64_t> shared_memo;
+    const auto shared_below = [&](auto& self, int x, int y) -> std::uint64_t {
+        const std::uint64_t key = pair_key(x, y);
+        if (const auto it = shared_memo.find(key); it != shared_memo.end())
+            return it->second;
+        std::uint64_t shared =
+            overlap(sets[static_cast<std::size_t>(x)], sets[static_cast<std::size_t>(y)]);
+        const std::vector<int>& xs = at(x).children;
+        const std::vector<int>& ys = at(y).children;
+        for (auto i = xs.begin(), j = ys.begin(); i != xs.end() && j != ys.end();) {
+            const std::string_view a = name_of(*i);
+            const std::string_view b = name_of(*j);
+            if (a < b) {
+                ++i;
+            } else if (b < a) {
+                ++j;
+            } else {
+                shared += self(self, *i++, *j++);
+            }
+        }
+        shared_memo.emplace(key, shared);
+        return shared;
+    };
+
+    // Pairs of similar files directly in them are the seeds. Their parents
+    // are candidates as long as the pair below has the same name in both,
+    // e.g. GAG/.git with GAG/.git makes GAG with GAG and their parents; a
+    // folder and one inside it in the same scope never are.
+    const auto nested = [&](int x, int y) {
+        return at(x).scope == at(y).scope
+            && (x == y || is_inside(at(x).path, at(y).path) || is_inside(at(y).path, at(x).path));
+    };
+    std::unordered_set<std::uint64_t> candidates;
+    std::vector<std::pair<int, int>> candidate_list;
     for (const Found& f : found) {
+        for (int x = f.larger, y = f.smaller;;) {
+            if (!candidates.insert(pair_key(x, y)).second)
+                break; // the way up from here is known
+            candidate_list.emplace_back(x, y);
+            const int px = at(x).parent;
+            const int py = at(y).parent;
+            if (name_of(x) != name_of(y) || px < 0 || py < 0 || nested(px, py))
+                break;
+            x = px;
+            y = py;
+        }
+    }
+
+    // Similar are the candidates sharing at least the threshold of the files
+    // below the larger one.
+    std::vector<Found> similar;
+    std::unordered_set<std::uint64_t> pairs;
+    const std::uint64_t min_files = std::max<std::uint64_t>(options.min_files, 1);
+    for (auto [x, y] : candidate_list) {
+        if (at(x).files < at(y).files)
+            std::swap(x, y);
+        if (at(y).files < min_files)
+            continue;
+        const std::uint64_t shared = shared_below(shared_below, x, y);
+        if (shared * 100 >= percent * at(x).files) {
+            similar.push_back({x, y, shared});
+            pairs.insert(pair_key(x, y));
+        }
+    }
+
+    // Without `nested`, only the topmost pairs: none inside another one.
+    std::vector<DuplicateDirPair> result;
+    for (const Found& f : similar) {
         bool inside = false;
-        for (int x = f.larger; x >= 0 && !inside; x = dirs[static_cast<std::size_t>(x)].parent) {
-            for (int y = f.smaller; y >= 0 && !inside; y = dirs[static_cast<std::size_t>(y)].parent)
+        for (int x = f.larger; !options.nested && x >= 0 && !inside; x = at(x).parent) {
+            for (int y = f.smaller; y >= 0 && !inside; y = at(y).parent)
                 inside = (x != f.larger || y != f.smaller) && pairs.count(pair_key(x, y));
         }
         if (inside)
             continue;
-        const Dir& first = dirs[static_cast<std::size_t>(f.larger)];
-        const Dir& second = dirs[static_cast<std::size_t>(f.smaller)];
-        const std::uint64_t first_files = sets[static_cast<std::size_t>(f.larger)].size();
-        result.push_back({{first.scope, first.path}, {second.scope, second.path}, first_files,
-                          sets[static_cast<std::size_t>(f.smaller)].size(), f.shared,
-                          first.total_disk, second.total_disk,
-                          static_cast<unsigned>(f.shared * 100 / first_files)});
+        const Dir& first = at(f.larger);
+        const Dir& second = at(f.smaller);
+        result.push_back({{first.scope, first.path}, {second.scope, second.path}, first.files,
+                          second.files, f.shared, first.total_disk, second.total_disk,
+                          static_cast<unsigned>(f.shared * 100 / first.files)});
     }
     std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
         const auto smaller = [](const DuplicateDirPair& p) {

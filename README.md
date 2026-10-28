@@ -99,14 +99,20 @@ sizes only, without reading the files:
   the first. Files smaller than `--min-size` (1 byte) are left out, and so are
   hard links counted elsewhere, which take no space of their own.
 - With `--dirs`, pairs of directories sharing at least `--threshold` percent
-  (80) of the files directly in them, counted against the directory with
-  more files. Files in subdirectories do not count, as a folder made mostly
-  of one subfolder, such as a repository of its `.git`, would match it. Files are compared by name and size, or with `--names` by
-  name only, so that they may differ in size. Directories with fewer than
+  (80) of the files below the directory with more files. Files are compared
+  by name and size, or with `--names` by name only, so that they may differ
+  in size. Pairs start from directories similar by the files directly in
+  them, and go up through their parents as long as the two have the same
+  name: copies of `A/gitmy/GAG/.git` and `B/gitmy/GAG/.git` lead to `GAG`
+  with `GAG` and `gitmy` with `gitmy`. Two directories share the files
+  directly in both and, recursively, those of their subdirectories of the
+  same names, so a subfolder weighs as much as the files in it, and a
+  repository never pairs with its own `.git`. Directories with fewer than
   `--min-files` files (5) are left out, a directory is never paired with one
   inside it, and only the topmost pairs are listed: `A/x` with `B/x` is left
-  out when `A` and `B` pair. Pairs are sorted by the disk usage of the smaller
-  directory.
+  out when `A` and `B` pair, unless `--nested` (in the GUI, Also pairs inside
+  listed pairs) lists them too. Pairs are sorted by the disk usage of the
+  smaller directory.
 
 On `/usr` (870,000 entries) either takes about 0.4 s and some 100 MB of
 memory.
