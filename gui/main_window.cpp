@@ -13,6 +13,7 @@
 #include "ducat/database.hpp"
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
+#include "ducat/version.hpp"
 #include "ducat/plugin/archive.hpp"
 #include "ducat/plugin/viewer.hpp"
 
@@ -175,6 +176,11 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     duplicates->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_D);
     duplicates->setToolTip(tr("Find probable duplicate files and similar folders among the "
                               "stored ones, also across drives (Ctrl+Shift+D)"));
+
+    QMenu* help_menu = menuBar()->addMenu(tr("&Help"));
+    help_menu->addAction(icon("help-about", QStyle::SP_MessageBoxInformation), tr("&About ducat"),
+                         this, &MainWindow::show_about);
+    help_menu->addAction(tr("About &Qt"), qApp, &QApplication::aboutQt);
 
     one_file_system_action_ = options_menu->addAction(tr("&One File System"));
     one_file_system_action_->setCheckable(true);
@@ -1273,6 +1279,30 @@ std::string MainWindow::selected_name() const
 {
     const QModelIndex index = view_->currentIndex();
     return index.isValid() ? model_->entry(index.row()).name : std::string();
+}
+
+void MainWindow::show_about()
+{
+    // Which build runs, e.g. the installed one or one from the build tree.
+    const QString commit = to_qstring(std::string(ducat::commit()));
+    const QString time = to_qstring(std::string(ducat::commit_time()));
+    QStringList plugins;
+    for (const QString& line : Plugins::instance().report())
+        plugins << line.toHtmlEscaped();
+    QMessageBox::about(
+        this, tr("About ducat"),
+        tr("<h3>ducat %1</h3>"
+           "<p>Fast disk usage catalog: scans drives into a database and browses, searches "
+           "and finds duplicates there, also when the drives are not mounted.</p>"
+           "<p>Commit: <b>%2</b>%3<br>Program: %4<br>Database: %5<br>Qt %6</p>"
+           "<p>Plugins:<br>%7</p>"
+           "<p>License: GNU LGPL 3 or later.<br>"
+           "<a href=\"https://github.com/siplasplas/ducat\">github.com/siplasplas/ducat</a></p>")
+            .arg(to_qstring(std::string(ducat::version())), commit.toHtmlEscaped(),
+                 time.isEmpty() ? QString() : tr(", %1").arg(time),
+                 QCoreApplication::applicationFilePath().toHtmlEscaped(),
+                 to_qstring(database_).toHtmlEscaped(), QString::fromLatin1(qVersion()),
+                 plugins.isEmpty() ? tr("none") : plugins.join(QStringLiteral("<br>"))));
 }
 
 void MainWindow::show_error(const QString& message)

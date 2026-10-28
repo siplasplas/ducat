@@ -14,6 +14,16 @@ add_library(libducat
 )
 add_library(ducat::libducat ALIAS libducat)
 
+# The commit built, for --version and About; checked at every build.
+set(build_info "${CMAKE_CURRENT_BINARY_DIR}/generated/build_info.hpp")
+add_custom_target(ducat_build_info
+    COMMAND "${CMAKE_COMMAND}" -DSOURCE_DIR=${PROJECT_SOURCE_DIR} -DOUTPUT=${build_info}
+            -P "${PROJECT_SOURCE_DIR}/cmake/build_info.cmake"
+    BYPRODUCTS "${build_info}"
+    COMMENT "Checking the Git commit"
+    VERBATIM)
+add_dependencies(libducat ducat_build_info)
+
 set_target_properties(libducat PROPERTIES
     # Also linked into the GUI plugins, which are shared objects.
     POSITION_INDEPENDENT_CODE ON

@@ -169,6 +169,8 @@ private:
     void update_progress();
     void finish_scan(const ScanOutcome& outcome);
     void show_error(const QString& message);
+    // Help > About: the version, the commit built and where it runs from.
+    void show_about();
     std::string selected_name() const;
 
     std::string database_;

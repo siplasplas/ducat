@@ -301,6 +301,12 @@ cmake --build build
 ./build/cli/ducat --version
 ```
 
+`ducat --version`, `ducat-gui --version` and Help > About in the GUI name
+the Git commit built and its time, with `+changes` when the tracked files
+differed from it, e.g. `0.1.0 (commit a03c85d, 2026-10-28 19:45)`; every
+build checks the commit again. About also shows where the program runs
+from, so an installed copy is told apart from one in the build tree.
+
 The database uses [Tkrzw](https://dbmx.net/tkrzw/). The first build downloads
 Tkrzw 1.0.34 (checked by SHA-256) and builds it as a static library inside the
 build directory, which needs network access once. To use the system library

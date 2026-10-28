@@ -20,7 +20,7 @@ int main(int argc, char* argv[])
     // siplasplas programs.
     QApplication::setApplicationName("ducat");
     QApplication::setOrganizationName("siplasplas");
-    QApplication::setApplicationVersion(QString::fromUtf8(ducat::version()));
+    QApplication::setApplicationVersion(QString::fromStdString(ducat::full_version()));
     // The installed ducat.desktop; on Wayland it ties the window to its icon.
     QApplication::setDesktopFileName(QStringLiteral("ducat"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("ducat"),

@@ -671,7 +671,7 @@ int main(int argc, char* argv[])
         return 0;
     }
     if (arg == "-V" || arg == "--version") {
-        std::cout << "ducat " << ducat::version() << '\n';
+        std::cout << "ducat " << ducat::full_version() << '\n';
         return 0;
     }
 
