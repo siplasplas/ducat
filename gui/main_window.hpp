@@ -59,6 +59,11 @@ public:
     // brings the window to the front.
     void show_entry(const std::string& folder, const std::string& name);
 
+    // Shows the stored file `name` in `folder` in the viewer plugin (F3) when
+    // it is on disk now, i.e. its drive is mounted; else explains in the
+    // status bar.
+    void view_file(const std::string& folder, const ducat::Node& entry);
+
     // Switches to another database file, which may not exist yet, shows its
     // first tree and remembers it for the next start. Refuses, with a message
     // in the status bar, an existing file that is not a ducat database. Does

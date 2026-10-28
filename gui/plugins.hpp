@@ -7,6 +7,7 @@ class QWidget;
 
 namespace ducat {
 class FileDialogPlugin;
+class ViewerPlugin;
 }
 
 // The plugins of ducat-gui, loaded once from the plugin directories:
@@ -19,6 +20,9 @@ public:
     // The file dialog plugin, or null when none was loaded.
     ducat::FileDialogPlugin* file_dialog() const { return file_dialog_; }
 
+    // The viewer plugin (F3), or null when none was loaded.
+    ducat::ViewerPlugin* viewer() const { return viewer_; }
+
     // What was found, for --plugins: one line per plugin file or problem.
     const QStringList& report() const { return report_; }
 
@@ -29,6 +33,7 @@ private:
     Plugins();
 
     ducat::FileDialogPlugin* file_dialog_ = nullptr;
+    ducat::ViewerPlugin* viewer_ = nullptr;
     QStringList report_;
 };
 

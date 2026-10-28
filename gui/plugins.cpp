@@ -1,6 +1,7 @@
 #include "plugins.hpp"
 
 #include "ducat/plugin/file_dialog.hpp"
+#include "ducat/plugin/viewer.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -44,14 +45,23 @@ Plugins::Plugins()
                 report_ << QStringLiteral("%1: not loaded: %2").arg(file, loader.errorString());
                 continue;
             }
-            if (auto* dialog = qobject_cast<ducat::FileDialogPlugin*>(plugin)) {
-                if (file_dialog_) {
-                    report_ << QStringLiteral("%1: file dialog %2, not used: one is loaded")
-                                   .arg(file, dialog->name());
+            // The first plugin of each kind is used.
+            const auto take = [&](auto* found, auto*& slot, const char* kind) {
+                if (slot) {
+                    report_ << QStringLiteral("%1: %2 %3, not used: one is loaded")
+                                   .arg(file, QLatin1String(kind), found->name());
                 } else {
-                    file_dialog_ = dialog;
-                    report_ << QStringLiteral("%1: file dialog %2").arg(file, dialog->name());
+                    slot = found;
+                    report_ << QStringLiteral("%1: %2 %3")
+                                   .arg(file, QLatin1String(kind), found->name());
                 }
+            };
+            if (auto* dialog = qobject_cast<ducat::FileDialogPlugin*>(plugin)) {
+                take(dialog, file_dialog_, "file dialog");
+                continue;
+            }
+            if (auto* viewer = qobject_cast<ducat::ViewerPlugin*>(plugin)) {
+                take(viewer, viewer_, "viewer");
                 continue;
             }
             report_ << QStringLiteral("%1: not a ducat plugin").arg(file);

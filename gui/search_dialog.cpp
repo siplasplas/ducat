@@ -18,6 +18,7 @@
 #include <QLocale>
 #include <QPushButton>
 #include <QRegularExpression>
+#include <QShortcut>
 #include <QTreeView>
 #include <QVBoxLayout>
 
@@ -121,8 +122,16 @@ SearchDialog::SearchDialog(MainWindow& window)
     view_->header()->resizeSection(DirectoryModel::Name, 260);
     for (int column = DirectoryModel::Disk; column < DirectoryModel::Folder; ++column)
         view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    view_->setToolTip(tr("Enter or a double click shows the entry in the main window"));
+    view_->setToolTip(tr("Enter or a double click shows the entry in the main window, "
+                         "F3 shows a file when its drive is mounted"));
     connect(view_, &QTreeView::activated, this, &SearchDialog::open_result);
+    auto* view_file = new QShortcut(Qt::Key_F3, view_);
+    view_file->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(view_file, &QShortcut::activated, this, [this] {
+        const QModelIndex index = view_->currentIndex();
+        if (index.isValid())
+            window_.view_file(model_->folder(index.row()), model_->entry(index.row()));
+    });
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(form);

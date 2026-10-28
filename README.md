@@ -119,6 +119,14 @@ read and, when refreshing, the progress against the stored count; the button
 next to them stops a scan without changing the database. One file system,
 on by default, keeps scans from descending into other file systems.
 
+View (F3), in the main window and among search matches, shows the selected
+file when it is on disk now, that is when its drive is mounted, read-only:
+files up to 5 MiB (the setting `viewer/small_file_mib`, at most a tenth of
+the memory) in an editor with syntax colours and encoding detection, larger
+ones in a viewer of the memory-mapped file. Keys 1 and 3 switch between text
+and hex, as in Total Commander's lister; Ctrl+F, F3 and Shift+F3 search; Escape
+closes the viewer.
+
 Database… (Ctrl+D) switches to another database file, or names a new one,
 which the first Scan Folder creates; the window title shows the file. The GUI
 starts with the database given by `-d`, else with the one chosen last if it
@@ -153,11 +161,20 @@ The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
 Features with further dependencies come as plugins of the GUI, so that
 `ducat-gui` itself depends only on Qt and works without them. Configuring
 fetches their dependencies from GitHub, which needs network access once;
-`-DDUCAT_BUILD_PLUGINS=OFF` skips the plugins. There is one so far:
+`-DDUCAT_BUILD_PLUGINS=OFF` skips the plugins. The plugins are:
 
 - `ducat-filedialog`: the file dialogs of
   [qt-extra](https://github.com/siplasplas/qt-extra) (`QxFileDialog`) for Scan
   Folder and Database; without it, Qt's own dialogs are used.
+- `ducat-viewer`: the F3 viewer, as in
+  [gemini-commander](https://github.com/siplasplas/gemini-commander), with
+  [qceditor](https://github.com/siplasplas/qceditor) and
+  [qcodeedit](https://github.com/siplasplas/qcodeedit) for small files and
+  [textviewers](https://github.com/ideorg/textviewers) for large ones. It needs
+  `sudo apt install libicu-dev libhunspell-dev libbotan-2-dev`. Kate syntax
+  definitions are read from, and downloaded to, `~/.local/share/kate-data`,
+  shared with the other programs using qcodeedit. Without the plugin, F3 does
+  nothing but say so.
 
 `ducat-gui` loads plugins from the directories in `$DUCAT_PLUGIN_PATH`
 (separated by `:`), from `lib/ducat/plugins` of its installation and, when run
@@ -176,8 +193,9 @@ cmake --install build --prefix ~/.local     # for the current user only
 This installs `ducat` and `ducat-gui` to `bin`, and with the GUI also
 `share/applications/ducat.desktop` and the icon
 `share/icons/hicolor/scalable/apps/ducat.svg`, so ducat appears in the menu of
-the desktop. Plugins go to `lib/ducat/plugins`, and a shared `libducat` to
-`lib`, where the installed programs find it. Remove the files listed in `build/install_manifest.txt` to uninstall.
+the desktop. Plugins go to `lib/ducat/plugins`, the encoding detection data of
+the viewer to `share/ducat/cpg`, and a shared `libducat` to `lib`, where the
+installed programs find it. `--strip` makes the plugins much smaller. Remove the files listed in `build/install_manifest.txt` to uninstall.
 
 ## Tests
 

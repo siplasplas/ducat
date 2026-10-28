@@ -8,6 +8,7 @@
 #include "ducat/database.hpp"
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
+#include "ducat/plugin/viewer.hpp"
 
 #include <QAction>
 #include <QDir>
@@ -89,6 +90,15 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                                        tr("Find…"), this, &MainWindow::show_search);
     find->setShortcut(QKeySequence::Find);
     find->setToolTip(tr("Search the stored entries by name, type, size, files or time (Ctrl+F)"));
+
+    QAction* view = toolbar->addAction(icon("document-preview", QStyle::SP_FileDialogDetailedView),
+                                       tr("View"), this, [this] {
+                                           const QModelIndex index = view_->currentIndex();
+                                           if (index.isValid() && !current_.empty())
+                                               view_file(current_, model_->entry(index.row()));
+                                       });
+    view->setShortcut(Qt::Key_F3);
+    view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
 
     refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
                                          tr("Refresh"), this, [this] { start_scan(current_); });
@@ -395,6 +405,29 @@ void MainWindow::show_entry(const std::string& folder, const std::string& name)
     open_directory(folder, name);
     raise();
     activateWindow();
+}
+
+void MainWindow::view_file(const std::string& folder, const ducat::Node& entry)
+{
+    if (entry.is_dir) {
+        show_error(tr("View shows files; Enter opens a folder"));
+        return;
+    }
+    ducat::ViewerPlugin* viewer = Plugins::instance().viewer();
+    if (!viewer) {
+        show_error(tr("The viewer plugin is not installed; see ducat-gui --plugins"));
+        return;
+    }
+    const QString path = to_qstring(ducat::join_path(folder, entry.name));
+    const QFileInfo info(path);
+    if (!info.isFile()) {
+        show_error(info.exists()
+                       ? tr("%1 is not a regular file on disk now").arg(path)
+                       : tr("%1 is not on disk now: its drive is not mounted, or it is gone")
+                             .arg(path));
+        return;
+    }
+    viewer->view_file(this, path);
 }
 
 void MainWindow::show_search()
