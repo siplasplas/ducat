@@ -2,6 +2,7 @@
 
 #include "directory_model.hpp"
 #include "duplicates_dialog.hpp"
+#include "gemini.hpp"
 #include "plugins.hpp"
 #include "search_dialog.hpp"
 #include "usage_delegate.hpp"
@@ -128,6 +129,12 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
         });
     view->setShortcut(Qt::Key_F3);
     view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
+    QAction* gemini = tools_menu->addAction(icon("system-file-manager", QStyle::SP_DirOpenIcon),
+                                            tr("Open in &gemini-commander"), this,
+                                            &MainWindow::open_in_gemini_commander);
+    gemini->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_G);
+    gemini->setToolTip(tr("Open the folder of the selected entry in gemini-commander, with the "
+                          "entry selected (Ctrl+Shift+G)"));
     QAction* duplicates = tools_menu->addAction(icon("edit-copy", QStyle::SP_FileDialogListView),
                                                 tr("&Duplicates…"), this,
                                                 &MainWindow::show_duplicates);
@@ -342,6 +349,41 @@ void MainWindow::refresh()
         return;
     }
     start_scan(current_);
+}
+
+void MainWindow::open_in_gemini_commander()
+{
+    if (current_.empty())
+        return;
+    const QModelIndex index = view_->currentIndex();
+    const std::string path =
+        index.isValid() ? ducat::join_path(current_, model_->entry(index.row()).name) : current_;
+
+    // An entry in an archive is not on disk; the archive above it is.
+    QString target = to_qstring(path);
+    if (!QFileInfo::exists(target)) {
+        target.clear();
+        for (std::string up = path; up != "/";) {
+            up = parent_of(up);
+            const QFileInfo info(to_qstring(up));
+            if (info.exists()) {
+                if (info.isFile())
+                    target = info.filePath();
+                break;
+            }
+        }
+        if (target.isEmpty()) {
+            show_error(tr("%1 is not on disk now: its drive is not mounted, or it is gone")
+                           .arg(to_qstring(path)));
+            return;
+        }
+    }
+    open_in_gemini(this, target, [this, target](const QString& error) {
+        if (error.isEmpty())
+            statusBar()->showMessage(tr("Opened %1 in gemini-commander").arg(target));
+        else
+            show_error(error);
+    });
 }
 
 void MainWindow::strip_archives()

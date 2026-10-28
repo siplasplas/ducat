@@ -3,6 +3,8 @@ add_executable(ducat-gui
     directory_model.hpp
     duplicates_dialog.cpp
     duplicates_dialog.hpp
+    gemini.cpp
+    gemini.hpp
     main.cpp
     main_window.cpp
     main_window.hpp
@@ -18,6 +20,22 @@ add_executable(ducat-gui
 
 set_target_properties(ducat-gui PROPERTIES AUTOMOC ON)
 target_link_libraries(ducat-gui PRIVATE ducat::libducat ducat_plugin_api Qt6::Widgets)
+
+# Opening a folder in gemini-commander over D-Bus. On Wayland an
+# xdg-activation token brings its window to the front; Qt offers it only
+# through a private interface (qt6-base-private-dev), so without that the
+# window may stay behind.
+find_package(Qt6 REQUIRED COMPONENTS DBus)
+set(QT_NO_PRIVATE_MODULE_WARNING ON) # used knowingly, for one interface
+find_package(Qt6 QUIET COMPONENTS GuiPrivate)
+target_link_libraries(ducat-gui PRIVATE Qt6::DBus)
+if(TARGET Qt6::GuiPrivate)
+    target_link_libraries(ducat-gui PRIVATE Qt6::GuiPrivate)
+    target_compile_definitions(ducat-gui PRIVATE DUCAT_HAVE_XDG_ACTIVATION)
+else()
+    message(STATUS "Qt GuiPrivate not found: no xdg-activation token for gemini-commander "
+                   "(install qt6-base-private-dev)")
+endif()
 
 # Where the installed plugins are, relative to the installed ducat-gui.
 file(RELATIVE_PATH plugin_dir_from_bin "${CMAKE_INSTALL_FULL_BINDIR}"

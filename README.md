@@ -210,6 +210,14 @@ ones in a viewer of the memory-mapped file. Keys 1 and 3 switch between text
 and hex, as in Total Commander's lister; Ctrl+F, F3 and Shift+F3 search; Escape
 closes the viewer.
 
+Tools > Open in gemini-commander (Ctrl+Shift+G) opens the folder of the
+selected entry in [gemini-commander](https://github.com/siplasplas/gemini-commander),
+with the entry selected, when it is on disk now; an entry inside an archive
+stands for the archive. A running gemini-commander gets it over D-Bus, else it
+is started; the setting `gemini/command` names another program. On Wayland an
+xdg-activation token, which Qt gives only through its private API
+(`qt6-base-private-dev` at build time), lets its window come to the front.
+
 Database… (Ctrl+D) switches to another database file, or names a new one,
 which the first Scan Folder creates; the window title shows the file. The GUI
 starts with the database given by `-d`, else with the one chosen last if it

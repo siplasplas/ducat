@@ -119,6 +119,8 @@ private:
     void store_live_archive();
     // Removes the stored contents of the archives below the shown folder.
     void strip_archives();
+    // Opens the selected entry's folder in gemini-commander, the entry selected.
+    void open_in_gemini_commander();
     // Whether `path` lies in the stored contents of an archive, not on disk.
     bool inside_contents(const std::string& path);
     void open_typed_path();
