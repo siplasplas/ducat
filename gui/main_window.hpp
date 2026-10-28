@@ -13,6 +13,7 @@
 #include <thread>
 
 class DirectoryModel;
+class DuplicatesDialog;
 class SearchDialog;
 namespace ducat {
 class Database;
@@ -94,6 +95,9 @@ private:
     void update_title();
     void fill_trees_menu();
     void show_search();
+    void show_duplicates();
+    // Tells the search and duplicates windows about the shown directory.
+    void update_dialog_scopes();
     void update_progress();
     void finish_scan(const ScanOutcome& outcome);
     void show_error(const QString& message);
@@ -112,6 +116,7 @@ private:
     QAction* database_action_;
     QMenu* trees_menu_;
     SearchDialog* search_dialog_ = nullptr; // created when first needed
+    DuplicatesDialog* duplicates_dialog_ = nullptr; // likewise
     QLabel* progress_label_;
     QProgressBar* progress_bar_;
     QToolButton* cancel_button_;

@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "directory_model.hpp"
+#include "duplicates_dialog.hpp"
 #include "plugins.hpp"
 #include "search_dialog.hpp"
 #include "usage_delegate.hpp"
@@ -99,6 +100,13 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                                        });
     view->setShortcut(Qt::Key_F3);
     view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
+
+    QAction* duplicates = toolbar->addAction(icon("edit-copy", QStyle::SP_FileDialogListView),
+                                             tr("Duplicates…"), this,
+                                             &MainWindow::show_duplicates);
+    duplicates->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_D);
+    duplicates->setToolTip(tr("Find probable duplicate files and similar folders among the "
+                              "stored ones, also across drives (Ctrl+Shift+D)"));
 
     refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
                                          tr("Refresh"), this, [this] { start_scan(current_); });
@@ -207,8 +215,7 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
     path_edit_->setText(shown);
     update_title();
     statusBar()->clearMessage();
-    if (search_dialog_)
-        search_dialog_->update_scope();
+    update_dialog_scopes();
 
     const int row = select.empty() ? -1 : model_->row_of(select);
     const QModelIndex index = model_->index(row < 0 ? 0 : row, 0);
@@ -440,6 +447,16 @@ void MainWindow::show_search()
     search_dialog_->activateWindow();
 }
 
+void MainWindow::show_duplicates()
+{
+    if (!duplicates_dialog_)
+        duplicates_dialog_ = new DuplicatesDialog(*this);
+    duplicates_dialog_->update_scope();
+    duplicates_dialog_->show();
+    duplicates_dialog_->raise();
+    duplicates_dialog_->activateWindow();
+}
+
 void MainWindow::fill_trees_menu()
 {
     trees_menu_->clear();
@@ -522,17 +539,26 @@ void MainWindow::set_database(const std::string& file)
     path_edit_->clear();
     if (search_dialog_)
         search_dialog_->clear_results();
+    if (duplicates_dialog_)
+        duplicates_dialog_->clear_results();
     update_title();
 
     if (!std::filesystem::exists(database_)) {
         show_error(tr("New database %1; it is created by the first Scan Folder")
                        .arg(to_qstring(database_)));
-        if (search_dialog_)
-            search_dialog_->update_scope();
+        update_dialog_scopes();
         return;
     }
-    if (!open_first_directory() && search_dialog_)
+    if (!open_first_directory())
+        update_dialog_scopes();
+}
+
+void MainWindow::update_dialog_scopes()
+{
+    if (search_dialog_)
         search_dialog_->update_scope();
+    if (duplicates_dialog_)
+        duplicates_dialog_->update_scope();
 }
 
 void MainWindow::update_title()

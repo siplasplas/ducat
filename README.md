@@ -140,6 +140,14 @@ read and, when refreshing, the progress against the stored count; the button
 next to them stops a scan without changing the database. One file system,
 on by default, keeps scans from descending into other file systems.
 
+Duplicates… (Ctrl+Shift+D) finds probable duplicates among the stored entries
+as `ducat dups` does, below the shown directory or in all stored trees, so
+also across drives: files with the same name and size, listed in groups with
+their copies, and folders sharing most of their files, listed in pairs that
+can be sorted by any column. Enter or a double click shows a copy, or the
+folder of the clicked half of a pair, in the main window; F3 views a copy. At
+most 10,000 groups or pairs are listed, the largest first.
+
 View (F3), in the main window and among search matches, shows the selected
 file when it is on disk now, that is when its drive is mounted, read-only:
 files up to 5 MiB (the setting `viewer/small_file_mib`, at most a tenth of

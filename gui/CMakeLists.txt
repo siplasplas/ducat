@@ -1,6 +1,8 @@
 add_executable(ducat-gui
     directory_model.cpp
     directory_model.hpp
+    duplicates_dialog.cpp
+    duplicates_dialog.hpp
     main.cpp
     main_window.cpp
     main_window.hpp
