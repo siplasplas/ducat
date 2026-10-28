@@ -8,6 +8,8 @@ add_executable(ducat-gui
     main_window.hpp
     plugins.cpp
     plugins.hpp
+    scope_selector.cpp
+    scope_selector.hpp
     search_dialog.cpp
     search_dialog.hpp
     usage_delegate.cpp

@@ -4,6 +4,7 @@
 
 #include <QApplication>
 #include <QDateTime>
+#include <QFileInfo>
 #include <QFont>
 #include <QLocale>
 #include <QStyle>
@@ -48,7 +49,7 @@ void DirectoryModel::set_directory(ducat::Node dir)
     rows_.clear();
     rows_.reserve(dir.children.size());
     for (ducat::Node& child : dir.children)
-        rows_.push_back({std::move(child), dir.name});
+        rows_.push_back({std::move(child), dir.name, {}});
     sort_rows();
     endResetModel();
 }
@@ -106,6 +107,8 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
             return QLocale().toString(QDateTime::fromSecsSinceEpoch(entry.modified),
                                       QLocale::ShortFormat);
         case Folder: return QString::fromStdString(folder(index.row()));
+        case Database:
+            return QFileInfo(QString::fromStdString(database(index.row()))).fileName();
         }
         break;
     case Qt::FontRole:
@@ -134,7 +137,7 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
                                                                     : QStyle::SP_FileIcon);
         break;
     case Qt::TextAlignmentRole:
-        if (column != Name && column != Folder)
+        if (column != Name && column != Folder && column != Database)
             return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
         break;
     }
@@ -154,6 +157,7 @@ QVariant DirectoryModel::headerData(int section, Qt::Orientation orientation, in
     case Folders: return tr("Folders");
     case Modified: return tr("Modified");
     case Folder: return tr("Folder");
+    case Database: return tr("Database");
     }
     return {};
 }
@@ -183,15 +187,17 @@ void DirectoryModel::sort_rows()
         }
     };
     const bool descending = sort_order_ == Qt::DescendingOrder;
-    const bool by_place = sort_column_ == Name || sort_column_ == Folder;
+    const bool by_place = sort_column_ == Name || sort_column_ == Folder || sort_column_ == Database;
     std::stable_sort(rows_.begin(), rows_.end(), [&](const Row& a, const Row& b) {
         const auto key_a = key(a.entry);
         const auto key_b = key(b.entry);
         if (key_a != key_b)
             return descending ? key_b < key_a : key_a < key_b;
         const auto place = [&](const Row& row) {
-            return sort_column_ == Folder ? std::tie(row.folder, row.entry.name)
-                                          : std::tie(row.entry.name, row.folder);
+            if (sort_column_ == Database)
+                return std::tie(row.database, row.folder, row.entry.name);
+            return sort_column_ == Folder ? std::tie(row.folder, row.entry.name, row.database)
+                                          : std::tie(row.entry.name, row.folder, row.database);
         };
         if (by_place && descending)
             return place(b) < place(a);

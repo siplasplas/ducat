@@ -2,6 +2,7 @@
 
 #include "directory_model.hpp"
 #include "main_window.hpp"
+#include "scope_selector.hpp"
 
 #include "ducat/format.hpp"
 #include "ducat/search.hpp"
@@ -81,7 +82,7 @@ SearchDialog::SearchDialog(MainWindow& window)
       min_files_(line_edit(this, tr("number"))), max_files_(line_edit(this, tr("number"))),
       newer_(line_edit(this, tr("e.g. 30d or 2024-01-31"))),
       older_(line_edit(this, tr("e.g. 1y or 2024-01-31 18:00"))),
-      all_trees_(new QCheckBox(this)), status_(new QLabel(this)),
+      scope_(new ScopeSelector(window, this)), status_(new QLabel(this)),
       model_(new DirectoryModel(this)), view_(new QTreeView(this))
 {
     setWindowTitle(tr("Find – ducat"));
@@ -100,7 +101,7 @@ SearchDialog::SearchDialog(MainWindow& window)
     form->addRow(tr("Size from:"), pair(this, min_size_, tr("to"), max_size_, apparent_));
     form->addRow(tr("Files inside from:"), pair(this, min_files_, tr("to"), max_files_));
     form->addRow(tr("Modified after:"), pair(this, newer_, tr("before"), older_));
-    form->addRow(tr("Look in:"), all_trees_);
+    form->addRow(tr("Look in:"), scope_);
 
     auto* buttons = new QDialogButtonBox(this);
     QPushButton* find = buttons->addButton(tr("Find"), QDialogButtonBox::AcceptRole);
@@ -118,10 +119,14 @@ SearchDialog::SearchDialog(MainWindow& window)
     view_->setSortingEnabled(true);
     view_->sortByColumn(DirectoryModel::Disk, Qt::DescendingOrder);
     view_->setColumnHidden(DirectoryModel::Usage, true);
-    view_->header()->setStretchLastSection(true);
+    view_->setColumnHidden(DirectoryModel::Database, true); // shown for several databases
+    view_->header()->setStretchLastSection(false);
     view_->header()->resizeSection(DirectoryModel::Name, 260);
     for (int column = DirectoryModel::Disk; column < DirectoryModel::Folder; ++column)
         view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    view_->header()->setSectionResizeMode(DirectoryModel::Folder, QHeaderView::Stretch);
+    view_->header()->setSectionResizeMode(DirectoryModel::Database,
+                                          QHeaderView::ResizeToContents);
     view_->setToolTip(tr("Enter or a double click shows the entry in the main window, "
                          "F3 shows a file when its drive is mounted"));
     connect(view_, &QTreeView::activated, this, &SearchDialog::open_result);
@@ -139,21 +144,17 @@ SearchDialog::SearchDialog(MainWindow& window)
     layout->addWidget(view_, 1);
     layout->addWidget(status_);
 
-    update_scope();
-    resize(950, 650);
+    resize(950, 700);
 }
 
 void SearchDialog::update_scope()
 {
-    const std::string& current = window_.current_directory();
-    if (current.empty()) {
-        all_trees_->setText(tr("All stored trees"));
-        all_trees_->setChecked(true);
-        all_trees_->setEnabled(false);
-    } else {
-        all_trees_->setText(tr("All stored trees, not only %1").arg(QString::fromStdString(current)));
-        all_trees_->setEnabled(true);
-    }
+    scope_->update_shown_folder();
+}
+
+void SearchDialog::refresh_scope()
+{
+    scope_->refresh();
 }
 
 void SearchDialog::run_search()
@@ -212,19 +213,26 @@ void SearchDialog::run_search()
         return;
     }
 
-    update_scope();
-    const std::string scope = all_trees_->isChecked() ? std::string() : window_.current_directory();
+    const std::vector<ScopeSelector::Selection> selections = scope_->selection();
+    if (selections.empty()) {
+        status_->setText(tr("No stored tree is checked under Look in"));
+        return;
+    }
     std::vector<DirectoryModel::Row> rows;
     std::size_t matches = 0;
     QString error;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool done = window_.with_database(
-        [&](ducat::Database& db) {
-            ducat::search(db, query, scope, [&](const std::string& path, const ducat::Node& entry) {
-                if (++matches <= max_rows)
-                    rows.push_back({entry, parent_of(path)});
-                return true;
-            });
+    const bool done = window_.with_databases(
+        selections,
+        [&](const std::vector<ducat::Scope>& scopes) {
+            ducat::search(scopes, query,
+                          [&](std::size_t scope, const std::string& path,
+                              const ducat::Node& entry) {
+                              if (++matches <= max_rows)
+                                  rows.push_back(
+                                      {entry, parent_of(path), selections[scope].database});
+                              return true;
+                          });
         },
         error);
     QApplication::restoreOverrideCursor();
@@ -233,6 +241,7 @@ void SearchDialog::run_search()
         return;
     }
 
+    view_->setColumnHidden(DirectoryModel::Database, selections.size() < 2);
     model_->set_rows(std::move(rows));
     if (model_->rowCount() > 0)
         view_->setCurrentIndex(model_->index(0, 0));
@@ -265,5 +274,6 @@ void SearchDialog::clear_results()
 void SearchDialog::open_result(const QModelIndex& index)
 {
     if (index.isValid())
-        window_.show_entry(model_->folder(index.row()), model_->entry(index.row()).name);
+        window_.show_entry_in(model_->database(index.row()), model_->folder(index.row()),
+                              model_->entry(index.row()).name);
 }

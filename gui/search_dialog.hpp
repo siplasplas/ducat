@@ -10,6 +10,7 @@ class QLabel;
 class QLineEdit;
 class QModelIndex;
 class QTreeView;
+class ScopeSelector;
 
 // Searches the stored entries with the criteria of "ducat find" and lists
 // the matches; opening one shows it in the main window.
@@ -19,8 +20,11 @@ class SearchDialog : public QDialog {
 public:
     explicit SearchDialog(MainWindow& window);
 
-    // Updates the scope shown for "the current directory".
+    // Follows the folder shown in the main window.
     void update_scope();
+
+    // Reads the databases and trees to choose from again.
+    void refresh_scope();
 
     // Forgets the listed matches, e.g. after switching to another database.
     void clear_results();
@@ -41,7 +45,7 @@ private:
     QLineEdit* max_files_;
     QLineEdit* newer_;
     QLineEdit* older_;
-    QCheckBox* all_trees_;
+    ScopeSelector* scope_;
     QLabel* status_;
     DirectoryModel* model_;
     QTreeView* view_;

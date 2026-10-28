@@ -141,6 +141,7 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     view_->header()->setStretchLastSection(false);
     view_->setItemDelegateForColumn(DirectoryModel::Usage, new UsageDelegate(view_));
     view_->setColumnHidden(DirectoryModel::Folder, true);
+    view_->setColumnHidden(DirectoryModel::Database, true);
     view_->header()->setSectionResizeMode(DirectoryModel::Name, QHeaderView::Stretch);
     for (int column = DirectoryModel::Usage; column < DirectoryModel::ColumnCount; ++column)
         view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
@@ -367,6 +368,8 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
         return;
     }
 
+    // A scan may have added or removed a stored tree.
+    refresh_dialog_scopes();
     QString message;
     if (outcome.removed) {
         // Show the parent, or keep the current directory if it is elsewhere.
@@ -414,6 +417,49 @@ void MainWindow::show_entry(const std::string& folder, const std::string& name)
     activateWindow();
 }
 
+void MainWindow::show_entry_in(const std::string& database, const std::string& folder,
+                               const std::string& name)
+{
+    const auto absolute = [](const std::string& file) {
+        return QFileInfo(to_qstring(file)).absoluteFilePath();
+    };
+    if (absolute(database) != absolute(database_)) {
+        if (scan_thread_.joinable()) {
+            show_error(tr("%1 is in %2; open that database when the scan is done")
+                           .arg(to_qstring(ducat::join_path(folder, name)), to_qstring(database)));
+            return;
+        }
+        set_database(database);
+    }
+    show_entry(folder, name);
+}
+
+bool MainWindow::with_databases(const std::vector<ScopeSelector::Selection>& selections,
+                                const std::function<void(const std::vector<ducat::Scope>&)>& use,
+                                QString& error)
+{
+    // The lock keeps a scan from writing the shown database meanwhile.
+    const std::unique_lock lock(database_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        error = tr("The database is being written; try again in a moment");
+        return false;
+    }
+    try {
+        std::vector<std::unique_ptr<ducat::Database>> databases;
+        std::vector<ducat::Scope> scopes;
+        for (const ScopeSelector::Selection& selection : selections) {
+            databases.push_back(std::make_unique<ducat::Database>(selection.database,
+                                                                  ducat::Database::Mode::read));
+            scopes.push_back({databases.back().get(), selection.paths});
+        }
+        use(scopes);
+    } catch (const ducat::DatabaseError& e) {
+        error = QString::fromUtf8(e.what());
+        return false;
+    }
+    return true;
+}
+
 void MainWindow::view_file(const std::string& folder, const ducat::Node& entry)
 {
     if (entry.is_dir) {
@@ -441,7 +487,7 @@ void MainWindow::show_search()
 {
     if (!search_dialog_)
         search_dialog_ = new SearchDialog(*this);
-    search_dialog_->update_scope();
+    search_dialog_->refresh_scope();
     search_dialog_->show();
     search_dialog_->raise();
     search_dialog_->activateWindow();
@@ -451,7 +497,7 @@ void MainWindow::show_duplicates()
 {
     if (!duplicates_dialog_)
         duplicates_dialog_ = new DuplicatesDialog(*this);
-    duplicates_dialog_->update_scope();
+    duplicates_dialog_->refresh_scope();
     duplicates_dialog_->show();
     duplicates_dialog_->raise();
     duplicates_dialog_->activateWindow();
@@ -530,6 +576,8 @@ void MainWindow::set_database(const std::string& file)
         show_error(error);
         return;
     }
+    // The database shown so far stays one to search in.
+    ScopeSelector::remember_database(database_);
     database_ = file;
     QSettings().setValue(QStringLiteral("database"), to_qstring(database_));
 
@@ -537,20 +585,17 @@ void MainWindow::set_database(const std::string& file)
     model_->set_rows({});
     totals_->clear();
     path_edit_->clear();
-    if (search_dialog_)
-        search_dialog_->clear_results();
-    if (duplicates_dialog_)
-        duplicates_dialog_->clear_results();
     update_title();
+    // Listed matches name their databases and stay valid; the trees to
+    // choose from start with the new shown database.
+    refresh_dialog_scopes();
 
     if (!std::filesystem::exists(database_)) {
         show_error(tr("New database %1; it is created by the first Scan Folder")
                        .arg(to_qstring(database_)));
-        update_dialog_scopes();
         return;
     }
-    if (!open_first_directory())
-        update_dialog_scopes();
+    open_first_directory();
 }
 
 void MainWindow::update_dialog_scopes()
@@ -559,6 +604,14 @@ void MainWindow::update_dialog_scopes()
         search_dialog_->update_scope();
     if (duplicates_dialog_)
         duplicates_dialog_->update_scope();
+}
+
+void MainWindow::refresh_dialog_scopes()
+{
+    if (search_dialog_)
+        search_dialog_->refresh_scope();
+    if (duplicates_dialog_)
+        duplicates_dialog_->refresh_scope();
 }
 
 void MainWindow::update_title()

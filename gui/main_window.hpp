@@ -1,5 +1,8 @@
 #pragma once
 
+#include "scope_selector.hpp"
+
+#include "ducat/database.hpp"
 #include "ducat/scanner.hpp"
 
 #include <QMainWindow>
@@ -53,8 +56,25 @@ public:
     // cannot be opened.
     bool with_database(const std::function<void(ducat::Database&)>& use, QString& error);
 
+    // Opens the chosen databases for reading and passes their scopes to
+    // `use`, in the order of `selections`; as with_database otherwise.
+    bool with_databases(const std::vector<ScopeSelector::Selection>& selections,
+                        const std::function<void(const std::vector<ducat::Scope>&)>& use,
+                        QString& error);
+
     // The shown directory, empty before the first one.
     const std::string& current_directory() const { return current_; }
+
+    // The shown database file.
+    const std::string& database() const { return database_; }
+
+    // Shows `message` in the status bar.
+    void show_message(const QString& message) { show_error(message); }
+
+    // As show_entry, after switching the main window to `database` when it
+    // shows another one.
+    void show_entry_in(const std::string& database, const std::string& folder,
+                       const std::string& name);
 
     // Shows the directory `folder` with the entry `name` selected, and
     // brings the window to the front.
@@ -98,6 +118,8 @@ private:
     void show_duplicates();
     // Tells the search and duplicates windows about the shown directory.
     void update_dialog_scopes();
+    // Makes them read the databases and trees to choose from again.
+    void refresh_dialog_scopes();
     void update_progress();
     void finish_scan(const ScanOutcome& outcome);
     void show_error(const QString& message);

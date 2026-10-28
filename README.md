@@ -140,10 +140,18 @@ bar opens that directory, and the Trees menu lists the stored trees to go to.
 
 Find (Ctrl+F) searches the stored entries with the criteria of `ducat find`:
 type, name pattern, extensions, size and number of files inside with lower and
-upper limits, and modification time, below the shown directory or in all
-stored trees. The matches are listed with their folder and can be sorted like
-a directory; Enter or a double click shows the match in the main window. At
+upper limits, and modification time. The matches are listed with their folder,
+and their database when several are searched, and can be sorted like a
+directory; Enter or a double click shows the match in the main window. At
 most 200,000 matches are listed.
+
+Both Find and Duplicates look in the trees checked under Look in: the stored
+trees of the shown database and of further databases, e.g. one of the home
+directory and one of removable drives, which Add Database… adds and Remove
+takes away. The database shown before another one was opened stays among
+them. Unchecked trees and the further databases are remembered; Only the
+shown folder looks below the folder shown in the main window instead. A match
+in another database opens that database in the main window.
 
 Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
 scans the shown directory again, which updates the directories above it as
@@ -153,8 +161,8 @@ next to them stops a scan without changing the database. One file system,
 on by default, keeps scans from descending into other file systems.
 
 Duplicates… (Ctrl+Shift+D) finds probable duplicates among the stored entries
-as `ducat dups` does, below the shown directory or in all stored trees, so
-also across drives: files with the same name and size, listed in groups with
+as `ducat dups` does, also across drives and databases: files with the same
+name and size, listed in groups with
 their copies, and folders sharing most of their files, listed in pairs that
 can be sorted by any column. Enter or a double click shows a copy, or the
 folder of the clicked half of a pair, in the main window; F3 views a copy. At

@@ -1,12 +1,14 @@
 #include "duplicates_dialog.hpp"
 
 #include "main_window.hpp"
+#include "scope_selector.hpp"
 
 #include "ducat/duplicates.hpp"
 #include "ducat/format.hpp"
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QFileInfo>
 #include <QFont>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -30,8 +32,9 @@ constexpr std::size_t max_listed = 10000;
 
 // Folder pairs sort by this role: numbers as numbers.
 constexpr int sort_role = Qt::UserRole + 1;
-// Rows standing for a stored entry keep its path in this role.
+// Rows standing for a stored entry keep its path and database in these roles.
 constexpr int path_role = Qt::UserRole + 2;
+constexpr int database_role = Qt::UserRole + 3;
 
 QString text(const std::string& value)
 {
@@ -84,7 +87,7 @@ std::pair<std::string, std::string> split(const std::string& path)
 } // namespace
 
 DuplicatesDialog::DuplicatesDialog(MainWindow& window)
-    : QDialog(&window), window_(window), all_trees_(new QCheckBox(this)),
+    : QDialog(&window), window_(window), scope_(new ScopeSelector(window, this)),
       tabs_(new QTabWidget(this))
 {
     setWindowTitle(tr("Duplicates – ducat"));
@@ -92,11 +95,12 @@ DuplicatesDialog::DuplicatesDialog(MainWindow& window)
     tabs_->addTab(make_folders_tab(), tr("Folders"));
 
     auto* scope = new QHBoxLayout;
-    scope->addWidget(new QLabel(tr("Look in:"), this));
-    scope->addWidget(all_trees_, 1);
+    auto* look_in = new QLabel(tr("Look in:"), this);
+    scope->addWidget(look_in, 0, Qt::AlignTop);
+    scope->addWidget(scope_, 1);
     auto* close = new QPushButton(tr("Close"), this);
     connect(close, &QPushButton::clicked, this, &QDialog::close);
-    scope->addWidget(close);
+    scope->addWidget(close, 0, Qt::AlignTop);
 
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(scope);
@@ -105,21 +109,20 @@ DuplicatesDialog::DuplicatesDialog(MainWindow& window)
     // Enter or a double click shows the entry, F3 views a file, in both lists.
     for (QTreeView* view : {files_view_, folders_view_}) {
         connect(view, &QTreeView::activated, this, [this](const QModelIndex& index) {
-            const std::string path = path_at(index);
-            if (!path.empty())
-                open_path(path);
+            const Entry entry = entry_at(index);
+            if (!entry.path.empty())
+                open_entry(entry);
         });
         auto* view_key = new QShortcut(Qt::Key_F3, view);
         view_key->setContext(Qt::WidgetWithChildrenShortcut);
         connect(view_key, &QShortcut::activated, this, [this, view] {
-            const std::string path = path_at(view->currentIndex());
-            if (!path.empty())
-                view_path(path);
+            const Entry entry = entry_at(view->currentIndex());
+            if (!entry.path.empty())
+                view_entry(entry);
         });
     }
 
-    update_scope();
-    resize(1000, 650);
+    resize(1000, 750);
 }
 
 QWidget* DuplicatesDialog::make_files_tab()
@@ -215,16 +218,12 @@ QWidget* DuplicatesDialog::make_folders_tab()
 
 void DuplicatesDialog::update_scope()
 {
-    const std::string& current = window_.current_directory();
-    if (current.empty()) {
-        all_trees_->setText(tr("All stored trees"));
-        all_trees_->setChecked(true);
-        all_trees_->setEnabled(false);
-    } else {
-        all_trees_->setText(tr("All stored trees, also across drives, not only %1")
-                                .arg(text(current)));
-        all_trees_->setEnabled(true);
-    }
+    scope_->update_shown_folder();
+}
+
+void DuplicatesDialog::refresh_scope()
+{
+    scope_->refresh();
 }
 
 void DuplicatesDialog::clear_results()
@@ -235,9 +234,38 @@ void DuplicatesDialog::clear_results()
     folders_status_->clear();
 }
 
-std::string DuplicatesDialog::scope() const
+template <typename Result>
+bool DuplicatesDialog::run(const std::function<Result(const std::vector<ducat::Scope>&)>& find,
+                           Result& result, QLabel* status)
 {
-    return all_trees_->isChecked() ? std::string() : window_.current_directory();
+    selections_ = scope_->selection();
+    if (selections_.empty()) {
+        status->setText(tr("No stored tree is checked under Look in"));
+        return false;
+    }
+    QString error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const bool done = window_.with_databases(
+        selections_, [&](const std::vector<ducat::Scope>& scopes) { result = find(scopes); },
+        error);
+    QApplication::restoreOverrideCursor();
+    if (!done)
+        status->setText(error);
+    return done;
+}
+
+QStandardItem* DuplicatesDialog::location_item(const ducat::Location& location) const
+{
+    // The database file before the path when several are searched.
+    const std::string& database = selections_[location.scope].database;
+    const QString shown = selections_.size() > 1
+        ? QStringLiteral("%1: %2").arg(QFileInfo(text(database)).fileName(), text(location.path))
+        : text(location.path);
+    QStandardItem* result = item(shown);
+    result->setData(text(location.path), path_role);
+    result->setData(text(database), database_role);
+    result->setToolTip(shown);
+    return result;
 }
 
 void DuplicatesDialog::find_files()
@@ -254,18 +282,11 @@ void DuplicatesDialog::find_files()
         options.min_size = *size;
     }
 
-    update_scope();
     std::vector<ducat::DuplicateFileGroup> groups;
-    QString error;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool done = window_.with_database(
-        [&](ducat::Database& db) { groups = ducat::find_duplicate_files(db, scope(), options); },
-        error);
-    QApplication::restoreOverrideCursor();
-    if (!done) {
-        files_status_->setText(error);
+    const std::function<std::vector<ducat::DuplicateFileGroup>(const std::vector<ducat::Scope>&)>
+        find = [&](const auto& scopes) { return ducat::find_duplicate_files(scopes, options); };
+    if (!run(find, groups, files_status_))
         return;
-    }
 
     files_model_->removeRows(0, files_model_->rowCount());
     std::uint64_t wasted = 0;
@@ -282,11 +303,8 @@ void DuplicatesDialog::find_files()
                                   number_item(count_text(group.copies.size()),
                                               group.copies.size()),
                                   number_item(size_text(group.wasted()), group.wasted())};
-        for (const ducat::Location& location : group.copies) {
-            QStandardItem* copy = item(text(location.path));
-            copy->setData(text(location.path), path_role);
-            name->appendRow({copy, item({}), item({}), item({})});
-        }
+        for (const ducat::Location& location : group.copies)
+            name->appendRow({location_item(location), item({}), item({}), item({})});
         files_model_->appendRow(row);
     }
     files_view_->expandAll();
@@ -306,28 +324,19 @@ void DuplicatesDialog::find_folders()
     options.names_only = names_only_->isChecked();
     options.min_files = static_cast<std::uint64_t>(min_files_->value());
 
-    update_scope();
     std::vector<ducat::DuplicateDirPair> pairs;
-    QString error;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    const bool done = window_.with_database(
-        [&](ducat::Database& db) { pairs = ducat::find_duplicate_dirs(db, scope(), options); },
-        error);
-    QApplication::restoreOverrideCursor();
-    if (!done) {
-        folders_status_->setText(error);
+    const std::function<std::vector<ducat::DuplicateDirPair>(const std::vector<ducat::Scope>&)>
+        find = [&](const auto& scopes) { return ducat::find_duplicate_dirs(scopes, options); };
+    if (!run(find, pairs, folders_status_))
         return;
-    }
 
     folders_view_->setSortingEnabled(false);
     folders_model_->removeRows(0, folders_model_->rowCount());
     const std::size_t listed = std::min(pairs.size(), max_listed);
     for (std::size_t i = 0; i < listed; ++i) {
         const ducat::DuplicateDirPair& pair = pairs[i];
-        QStandardItem* first = item(text(pair.first.path));
-        first->setData(text(pair.first.path), path_role);
-        QStandardItem* second = item(text(pair.second.path));
-        second->setData(text(pair.second.path), path_role);
+        QStandardItem* first = location_item(pair.first);
+        QStandardItem* second = location_item(pair.second);
         QStandardItem* similar = number_item(QStringLiteral("%1 %").arg(pair.similarity),
                                              pair.similarity);
         folders_model_->appendRow(
@@ -351,31 +360,34 @@ void DuplicatesDialog::find_folders()
                                        : QString()));
 }
 
-std::string DuplicatesDialog::path_at(const QModelIndex& index) const
+DuplicatesDialog::Entry DuplicatesDialog::entry_at(const QModelIndex& index) const
 {
     if (!index.isValid())
         return {};
+    QModelIndex cell;
     if (index.model() == folders_proxy_) {
         // The folder in the clicked half of the row.
         const int column = index.column() >= 5 ? 5 : 2;
-        const QModelIndex source = folders_proxy_->mapToSource(index);
-        return folders_model_->item(source.row(), column)->data(path_role).toString().toStdString();
+        cell = folders_model_->index(folders_proxy_->mapToSource(index).row(), column);
+    } else {
+        // A copy of a file group; a group row itself is no single entry.
+        cell = index.sibling(index.row(), 0);
     }
-    // A copy of a file group; a group row itself is no single entry.
-    return index.sibling(index.row(), 0).data(path_role).toString().toStdString();
+    return {cell.data(database_role).toString().toStdString(),
+            cell.data(path_role).toString().toStdString()};
 }
 
-void DuplicatesDialog::open_path(const std::string& path)
+void DuplicatesDialog::open_entry(const Entry& entry)
 {
-    const auto [folder, name] = split(path);
-    window_.show_entry(folder, name);
+    const auto [folder, name] = split(entry.path);
+    window_.show_entry_in(entry.database, folder, name);
 }
 
-void DuplicatesDialog::view_path(const std::string& path)
+void DuplicatesDialog::view_entry(const Entry& entry)
 {
-    const auto [folder, name] = split(path);
-    ducat::Node entry;
-    entry.name = name;
-    entry.is_dir = tabs_->currentIndex() == 1;
-    window_.view_file(folder, entry);
+    const auto [folder, name] = split(entry.path);
+    ducat::Node node;
+    node.name = name;
+    node.is_dir = tabs_->currentIndex() == 1;
+    window_.view_file(folder, node);
 }

@@ -1,8 +1,14 @@
 #pragma once
 
+#include "scope_selector.hpp"
+
+#include "ducat/duplicates.hpp"
+
 #include <QDialog>
 
+#include <functional>
 #include <string>
+#include <vector>
 
 class MainWindow;
 class QCheckBox;
@@ -11,6 +17,7 @@ class QLineEdit;
 class QModelIndex;
 class QSortFilterProxyModel;
 class QSpinBox;
+class QStandardItem;
 class QStandardItemModel;
 class QTabWidget;
 class QTreeView;
@@ -25,25 +32,39 @@ class DuplicatesDialog : public QDialog {
 public:
     explicit DuplicatesDialog(MainWindow& window);
 
-    // Updates the scope shown for "the current directory".
+    // Follows the folder shown in the main window.
     void update_scope();
+
+    // Reads the databases and trees to choose from again.
+    void refresh_scope();
 
     // Forgets the listed matches, e.g. after switching to another database.
     void clear_results();
 
 private:
+    // A stored entry: its database file and path.
+    struct Entry {
+        std::string database;
+        std::string path;
+    };
+
     QWidget* make_files_tab();
     QWidget* make_folders_tab();
     void find_files();
     void find_folders();
-    std::string scope() const;
-    // The stored entry a row stands for, as a path, or empty.
-    std::string path_at(const QModelIndex& index) const;
-    void open_path(const std::string& path);
-    void view_path(const std::string& path);
+    // Runs `find` on the chosen scopes; on failure explains in `status`.
+    template <typename Result>
+    bool run(const std::function<Result(const std::vector<ducat::Scope>&)>& find, Result& result,
+             QLabel* status);
+    QStandardItem* location_item(const ducat::Location& location) const;
+    // The stored entry a row stands for; an empty path for none.
+    Entry entry_at(const QModelIndex& index) const;
+    void open_entry(const Entry& entry);
+    void view_entry(const Entry& entry);
 
     MainWindow& window_;
-    QCheckBox* all_trees_;
+    ScopeSelector* scope_;
+    std::vector<ScopeSelector::Selection> selections_; // of the last search
     QTabWidget* tabs_;
 
     QCheckBox* same_time_;

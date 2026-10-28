@@ -13,14 +13,16 @@ class DirectoryModel : public QAbstractTableModel {
     Q_OBJECT
 
 public:
-    enum Column { Name, Usage, Disk, Size, Files, Folders, Modified, Folder, ColumnCount };
+    enum Column { Name, Usage, Disk, Size, Files, Folders, Modified, Folder, Database, ColumnCount };
     // Usage column: the entry's share of the directory's disk usage, 0 to 1.
     static constexpr int FractionRole = Qt::UserRole;
 
-    // An entry and the directory holding it.
+    // An entry, the directory holding it and the database file it is stored
+    // in (search results may come from several).
     struct Row {
         ducat::Node entry;
         std::string folder;
+        std::string database;
     };
 
     explicit DirectoryModel(QObject* parent = nullptr);
@@ -33,6 +35,10 @@ public:
 
     const ducat::Node& entry(int row) const { return rows_[static_cast<std::size_t>(row)].entry; }
     const std::string& folder(int row) const { return rows_[static_cast<std::size_t>(row)].folder; }
+    const std::string& database(int row) const
+    {
+        return rows_[static_cast<std::size_t>(row)].database;
+    }
     // The row of the entry called `name`, or -1.
     int row_of(const std::string& name) const;
 
