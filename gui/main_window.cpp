@@ -18,6 +18,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -154,6 +155,15 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
         });
     view->setShortcut(Qt::Key_F3);
     view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
+    QAction* edit = tools_menu->addAction(icon("document-edit", QStyle::SP_FileIcon), tr("&Edit"),
+                                          this, [this] {
+                                              const QModelIndex index = view_->currentIndex();
+                                              if (index.isValid() && !current_.empty())
+                                                  edit_file(current_, model_->entry(index.row()));
+                                          });
+    edit->setShortcut(Qt::Key_F4);
+    edit->setToolTip(tr("Edit the selected file, when its drive is mounted; saving updates the "
+                        "database (F4)"));
     QAction* gemini = tools_menu->addAction(icon("system-file-manager", QStyle::SP_DirOpenIcon),
                                             tr("Open in &gemini-commander"), this,
                                             &MainWindow::open_in_gemini_commander);
@@ -1051,6 +1061,48 @@ void MainWindow::view_file(const std::string& folder, const ducat::Node& entry)
         return;
     }
     viewer->view_file(this, path);
+}
+
+void MainWindow::edit_file(const std::string& folder, const ducat::Node& entry)
+{
+    if (entry.is_dir) {
+        show_error(tr("Edit opens files; Enter opens a folder"));
+        return;
+    }
+    ducat::ViewerPlugin* viewer = Plugins::instance().viewer();
+    if (!viewer) {
+        show_error(tr("The viewer plugin, which edits too, is not installed; see ducat-gui "
+                      "--plugins"));
+        return;
+    }
+    const QString path = to_qstring(ducat::join_path(folder, entry.name));
+    const QFileInfo info(path);
+    if (!info.isFile()) {
+        show_error(info.exists()
+                       ? tr("%1 is not a regular file on disk now").arg(path)
+                       : tr("%1 is not on disk now: its drive is not mounted, or it is gone")
+                             .arg(path));
+        return;
+    }
+    // A saved file gets its new size and time in the database.
+    viewer->edit_file(this, path, [this](const QString& saved) {
+        const std::string file = ducat::normalize_path(saved.toStdString());
+        if (!update_entries({file}))
+            return;
+        if (parent_of(file) == current_)
+            open_directory(current_, selected_name());
+        statusBar()->showMessage(tr("Saved %1").arg(saved));
+    });
+}
+
+void MainWindow::closeEvent(QCloseEvent* event)
+{
+    // Unsaved edits are asked about first.
+    if (ducat::ViewerPlugin* viewer = Plugins::instance().viewer(); viewer && !viewer->close_editor()) {
+        event->ignore();
+        return;
+    }
+    QMainWindow::closeEvent(event);
 }
 
 void MainWindow::show_search()

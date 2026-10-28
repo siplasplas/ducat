@@ -87,6 +87,14 @@ public:
     // status bar.
     void view_file(const std::string& folder, const ducat::Node& entry);
 
+    // Opens the file `name` in `folder` in the plugin's editor (F4) when it
+    // is on disk now; saving it updates the database.
+    void edit_file(const std::string& folder, const ducat::Node& entry);
+
+protected:
+    void closeEvent(QCloseEvent* event) override;
+
+public:
     // Switches to another database file, which may not exist yet, shows its
     // first tree and remembers it for the next start. Refuses, with a message
     // in the status bar, an existing file that is not a ducat database. Does

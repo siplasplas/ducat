@@ -229,6 +229,12 @@ ones in a viewer of the memory-mapped file. Keys 1 and 3 switch between text
 and hex, as in Total Commander's lister; Ctrl+F, F3 and Shift+F3 search; Escape
 closes the viewer.
 
+Edit (F4), in the main window and among search matches, opens the selected
+file, when it is on disk now, in qceditor's editor window from the same
+plugin: tabs, search and replace, encodings, syntax colours and spelling.
+Each save updates the file's entry in the shown database, when its folder is
+stored there. Closing ducat asks about unsaved files first.
+
 Tools > Open in gemini-commander (Ctrl+Shift+G) opens the folder of the
 selected entry in [gemini-commander](https://github.com/siplasplas/gemini-commander),
 with the entry selected, when it is on disk now; an entry inside an archive
@@ -282,7 +288,7 @@ fetches their dependencies from GitHub, which needs network access once;
 - `ducat-filedialog`: the file dialogs of
   [qt-extra](https://github.com/siplasplas/qt-extra) (`QxFileDialog`) for Scan
   Folder and Database; without it, Qt's own dialogs are used.
-- `ducat-viewer`: the F3 viewer, as in
+- `ducat-viewer`: the F3 viewer and the F4 editor, as in
   [gemini-commander](https://github.com/siplasplas/gemini-commander), with
   [qceditor](https://github.com/siplasplas/qceditor) and
   [qcodeedit](https://github.com/siplasplas/qcodeedit) for small files and
