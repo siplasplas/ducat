@@ -60,9 +60,14 @@ public:
     void show_entry(const std::string& folder, const std::string& name);
 
     // Switches to another database file, which may not exist yet, shows its
-    // first tree and remembers it for the next start. Does nothing while a
-    // scan runs.
+    // first tree and remembers it for the next start. Refuses, with a message
+    // in the status bar, an existing file that is not a ducat database. Does
+    // nothing while a scan runs.
     void set_database(const std::string& file);
+
+    // Returns why an existing `file` cannot be used as a database, or an
+    // empty string when it can or does not exist yet.
+    static QString check_database(const std::string& file);
 
 private:
     // The result of a background scan, passed back to the GUI thread.

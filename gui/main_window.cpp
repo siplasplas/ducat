@@ -450,20 +450,39 @@ void MainWindow::fill_trees_menu()
 
 void MainWindow::choose_database()
 {
-    // Qt's own dialog, like Scan Folder. A new name is accepted too; the
-    // file is created by the first scan.
-    const QString chosen = QFileDialog::getSaveFileName(
-        this, tr("Open or Create Database"), to_qstring(database_),
-        tr("ducat databases (*.tkt);;All files (*)"), nullptr,
-        QFileDialog::DontUseNativeDialog | QFileDialog::DontConfirmOverwrite);
-    if (!chosen.isEmpty())
-        set_database(chosen.toStdString());
+    // Qt's own dialog, like Scan Folder. A new name is accepted too, with
+    // .ducat added when it has no extension; the first scan creates the file.
+    QFileDialog dialog(this, tr("Open or Create Database"), to_qstring(database_),
+                       tr("ducat databases (*.ducat);;All files (*)"));
+    dialog.setAcceptMode(QFileDialog::AcceptSave);
+    dialog.setOptions(QFileDialog::DontUseNativeDialog | QFileDialog::DontConfirmOverwrite);
+    dialog.setDefaultSuffix(QStringLiteral("ducat"));
+    dialog.selectFile(to_qstring(database_));
+    if (dialog.exec() == QDialog::Accepted && !dialog.selectedFiles().isEmpty())
+        set_database(dialog.selectedFiles().first().toStdString());
+}
+
+QString MainWindow::check_database(const std::string& file)
+{
+    std::error_code ignored;
+    if (!std::filesystem::exists(file, ignored))
+        return {};
+    try {
+        ducat::Database(file, ducat::Database::Mode::read).close();
+    } catch (const ducat::DatabaseError& e) {
+        return QString::fromUtf8(e.what());
+    }
+    return {};
 }
 
 void MainWindow::set_database(const std::string& file)
 {
     if (scan_thread_.joinable())
         return; // the scan writes to the current database
+    if (const QString error = check_database(file); !error.isEmpty()) {
+        show_error(error);
+        return;
+    }
     database_ = file;
     QSettings().setValue(QStringLiteral("database"), to_qstring(database_));
 

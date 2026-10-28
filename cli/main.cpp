@@ -48,7 +48,10 @@ void print_usage(std::ostream& out)
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
            "  -V, --version          Show version and exit\n"
-           "  -d, --database FILE    Database file (default: ~/.cache/ducat/ducat.tkt)\n"
+           "  -d, --database FILE    Database file (default: "
+           "~/.local/share/siplasplas/ducat/drives.ducat);\n"
+           "                         a directory, given by a trailing / or existing,\n"
+           "                         means drives.ducat in it\n"
            "  -x, --one-file-system  Do not descend into other file systems (scan)\n"
            "  -j, --threads N        Scan with N threads (scan; default: "
         << ducat::default_scan_threads()
@@ -139,7 +142,7 @@ bool parse_options(int argc, char* argv[], int first, bool scan, CommandLine& li
                 std::cerr << "ducat: " << arg << " needs a FILE\n";
                 return false;
             }
-            line.database = argv[++i];
+            line.database = ducat::database_path_from_argument(argv[++i]);
         } else if (arg.starts_with('-') && arg != "-") {
             std::cerr << "ducat: unknown option '" << arg << "'\n";
             return false;
@@ -275,7 +278,7 @@ int run_find(int argc, char* argv[], int first)
             if (!text)
                 return 2;
             if (arg == "-d" || arg == "--database") {
-                database = *text;
+                database = ducat::database_path_from_argument(*text);
             } else if (arg == "-t" || arg == "--type") {
                 if (*text == "f")
                     query.type = ducat::SearchQuery::Type::file;

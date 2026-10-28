@@ -4,3 +4,6 @@ foreach(name IN ITEMS varint scanner record path database search)
     target_compile_options(test_${name} PRIVATE -Wall -Wextra -Wpedantic)
     add_test(NAME ${name} COMMAND test_${name})
 endforeach()
+
+# Writes foreign Tkrzw files to check that they are refused.
+target_link_libraries(test_database PRIVATE ducat_tkrzw)

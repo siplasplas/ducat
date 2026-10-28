@@ -8,12 +8,21 @@
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <system_error>
 #include <utility>
 
 namespace ducat {
 
 namespace {
+
+// The start of every Tkrzw hash or tree database file.
+constexpr std::string_view tkrzw_magic = "TkrzwHDB\n";
+
+// The record naming the format of the database. Its key does not start with
+// '/', so it never mixes with directory keys, and sorts before them.
+constexpr std::string_view format_key = "\x01" "format";
+constexpr std::string_view format_value = "ducat 1";
 
 [[noreturn]] void fail(const std::string& file, std::string_view what, const tkrzw::Status& status)
 {
@@ -77,11 +86,49 @@ struct Database::Share {
 Database::Database(const std::string& file, Mode mode)
     : file_(file), dbm_(std::make_unique<tkrzw::TreeDBM>())
 {
+    // An existing file must be a Tkrzw file before Tkrzw opens it, which in
+    // write mode could change it.
+    namespace fs = std::filesystem;
+    std::error_code error;
+    const bool exists = fs::exists(file, error);
+    if (exists) {
+        if (fs::is_directory(file, error))
+            throw DatabaseError(file_ + ": is a directory");
+        std::ifstream in(file, std::ios::binary);
+        char magic[tkrzw_magic.size()] = {};
+        in.read(magic, static_cast<std::streamsize>(tkrzw_magic.size()));
+        if (std::string_view(magic, sizeof magic) != tkrzw_magic)
+            throw DatabaseError(file_ + ": not a ducat database");
+    }
+
+    // A ducat database carries its format. An existing file is checked
+    // read-only first, as opening it for writing alone changes its header.
     const bool writable = mode == Mode::write;
+    bool claim = !exists; // a new database gets the format record
+    if (exists) {
+        tkrzw::Status status = dbm_->OpenAdvanced(file, false, tkrzw::File::OPEN_NO_CREATE);
+        if (!status.IsOK())
+            throw DatabaseError(file_ + ": not a ducat database (" + status.GetMessage() + ")");
+        std::string format;
+        status = dbm_->Get(format_key, &format);
+        const bool empty = dbm_->CountSimple() == 0;
+        dbm_->Close();
+        if (status == tkrzw::Status::NOT_FOUND_ERROR && empty && writable)
+            claim = true; // e.g. a database whose creation was cut short
+        else if (format != format_value)
+            throw DatabaseError(file_
+                                + (format.starts_with("ducat ")
+                                       ? ": made by another version of ducat (" + format
+                                             + "); scan the drives into a new database"
+                                       : ": not a ducat database"));
+    }
+
     const tkrzw::Status status = dbm_->OpenAdvanced(
         file, writable, writable ? tkrzw::File::OPEN_DEFAULT : tkrzw::File::OPEN_NO_CREATE);
     if (!status.IsOK())
         fail(file_, "cannot open", status);
+    if (claim)
+        set(format_key, format_value);
 }
 
 Database::~Database()
@@ -321,14 +368,15 @@ std::optional<Node> Database::load_directory(std::string_view path)
 
 std::optional<std::string> Database::first_directory()
 {
-    // Paths start with '/'; the first key is a directory key, as the
-    // segments of a directory sort after its own key.
+    // Paths start with '/'; the first such key is a directory key, as the
+    // segments of a directory sort after its own key. Keys before '/', such
+    // as the format record, are skipped, and no other key follows paths.
     const std::unique_ptr<tkrzw::DBM::Iterator> it = dbm_->MakeIterator();
-    tkrzw::Status status = it->First();
+    tkrzw::Status status = it->Jump("/");
     std::string key;
     if (status.IsOK())
         status = it->Get(&key);
-    if (status == tkrzw::Status::NOT_FOUND_ERROR)
+    if (status == tkrzw::Status::NOT_FOUND_ERROR || (status.IsOK() && !key.starts_with('/')))
         return std::nullopt;
     if (!status.IsOK())
         fail(file_, "cannot read", status);
@@ -346,11 +394,11 @@ std::vector<std::string> Database::roots()
     std::vector<std::string> result;
     std::vector<std::string> open;
     const std::unique_ptr<tkrzw::DBM::Iterator> it = dbm_->MakeIterator();
-    tkrzw::Status status = it->First();
+    tkrzw::Status status = it->Jump("/"); // skips the format record
     std::string key;
     while (status.IsOK()) {
         status = it->Get(&key);
-        if (!status.IsOK())
+        if (!status.IsOK() || !key.starts_with('/'))
             break;
         if (key.find('\0') != std::string::npos) { // a segment key
             status = it->Next();
@@ -407,15 +455,29 @@ std::uint64_t Database::file_size()
 
 std::string default_database_path()
 {
-    const char* cache = std::getenv("XDG_CACHE_HOME");
+    const char* data = std::getenv("XDG_DATA_HOME");
     std::filesystem::path dir;
-    if (cache && *cache) {
-        dir = cache;
+    if (data && *data) {
+        dir = data;
     } else {
         const char* home = std::getenv("HOME");
-        dir = std::filesystem::path(home ? home : ".") / ".cache";
+        dir = std::filesystem::path(home ? home : ".") / ".local" / "share";
     }
-    return (dir / "ducat" / "ducat.tkt").string();
+    return (dir / "siplasplas" / "ducat" / default_database_name).string();
+}
+
+std::string database_path_from_argument(std::string_view argument)
+{
+    std::string path(argument);
+    if (path == "~" || path.starts_with("~/")) {
+        const char* home = std::getenv("HOME");
+        if (home && *home)
+            path.replace(0, 1, home);
+    }
+    std::error_code error;
+    if (path.ends_with('/') || std::filesystem::is_directory(path, error))
+        path = join_path(path, default_database_name);
+    return path;
 }
 
 PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& options)

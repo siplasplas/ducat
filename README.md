@@ -80,8 +80,18 @@ ducat find ~ -e iso,img --min-size 1G
 ducat find /var/log -n '*.log' --older 1y
 ```
 
-The database is `~/.cache/ducat/ducat.tkt` (under `$XDG_CACHE_HOME` when set);
-`-d FILE` (`--database`) selects another file.
+### Databases
+
+The default database is `~/.local/share/siplasplas/ducat/drives.ducat` (under
+`$XDG_DATA_HOME` when set). `-d FILE` (`--database`), placed after the command,
+selects another file, by convention with the extension `.ducat`. A leading `~`
+stands for the home directory, and a directory, given with a trailing `/` or
+existing as one, stands for `drives.ducat` in it.
+
+A database records the format it was written in. ducat refuses, without
+changing it, a file that is not a ducat database or comes from a version with
+another format; such drives have to be scanned into a new database. Databases
+of versions before the `.ducat` files, in `~/.cache/ducat`, are not read.
 
 ### GUI
 
@@ -112,7 +122,8 @@ on by default, keeps scans from descending into other file systems.
 Database… (Ctrl+D) switches to another database file, or names a new one,
 which the first Scan Folder creates; the window title shows the file. The GUI
 starts with the database given by `-d`, else with the one chosen last if it
-still exists, else with the default one.
+is still a ducat database, else with the default one. Its settings are kept in
+`~/.config/siplasplas/ducat.conf`.
 
 The GUI opens the database only for the moment of each read or write, so
 `ducat scan` can run while the GUI is open.

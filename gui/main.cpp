@@ -9,11 +9,15 @@
 #include <QFileInfo>
 #include <QSettings>
 
+#include <cstdio>
+
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+    // Settings go to ~/.config/siplasplas/ducat.conf, shared place of the
+    // siplasplas programs.
     QApplication::setApplicationName("ducat");
-    QApplication::setOrganizationName("ducat");
+    QApplication::setOrganizationName("siplasplas");
     QApplication::setApplicationVersion(QString::fromUtf8(ducat::version()));
 
     QCommandLineParser parser;
@@ -25,7 +29,7 @@ int main(int argc, char* argv[])
         {"d", "database"},
         QApplication::translate("main",
                                 "Database file (default: the one chosen last in the GUI, "
-                                "else %1).")
+                                "else %1); a directory means drives.ducat in it.")
             .arg(QString::fromStdString(ducat::default_database_path())),
         QApplication::translate("main", "FILE"));
     parser.addOption(database_option);
@@ -34,14 +38,20 @@ int main(int argc, char* argv[])
         "[PATH]");
     parser.process(app);
 
-    // -d, else the database chosen last in the GUI if it still exists, else
-    // the default one.
+    // -d, else the database chosen last in the GUI if it is still a ducat
+    // database, else the default one.
     std::string database = ducat::default_database_path();
     const QString remembered = QSettings().value(QStringLiteral("database")).toString();
-    if (parser.isSet(database_option))
-        database = parser.value(database_option).toStdString();
-    else if (!remembered.isEmpty() && QFileInfo::exists(remembered))
+    if (parser.isSet(database_option)) {
+        database = ducat::database_path_from_argument(parser.value(database_option).toStdString());
+        if (const QString error = MainWindow::check_database(database); !error.isEmpty()) {
+            std::fprintf(stderr, "ducat-gui: %s\n", qPrintable(error));
+            return 1;
+        }
+    } else if (!remembered.isEmpty() && QFileInfo::exists(remembered)
+               && MainWindow::check_database(remembered.toStdString()).isEmpty()) {
         database = remembered.toStdString();
+    }
     MainWindow window(database);
     const QStringList paths = parser.positionalArguments();
     if (paths.isEmpty() || !window.open_directory(ducat::resolve_path(paths[0].toStdString())))

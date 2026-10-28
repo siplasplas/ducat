@@ -4,9 +4,12 @@
 #include "ducat/path.hpp"
 #include "ducat/scanner.hpp"
 
+#include <tkrzw_dbm_tree.h>
+
 #include <cerrno>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 
@@ -326,6 +329,89 @@ void test_compact()
     }
 }
 
+// Returns the message of the DatabaseError thrown when opening `file`, or
+// an empty string when it opens.
+std::string open_error(const fs::path& file, ducat::Database::Mode mode)
+{
+    try {
+        ducat::Database(file.string(), mode).close();
+    } catch (const ducat::DatabaseError& e) {
+        return e.what();
+    }
+    return {};
+}
+
+std::string read_file(const fs::path& file)
+{
+    std::ifstream in(file, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(in), {});
+}
+
+void test_format()
+{
+    using Mode = ducat::Database::Mode;
+    TempDir temp;
+
+    // A new database records its format and opens again; the format record
+    // is no directory.
+    const fs::path fresh = temp.path() / "fresh.ducat";
+    CHECK(open_error(fresh, Mode::write).empty());
+    CHECK(open_error(fresh, Mode::read).empty());
+    {
+        ducat::Database db(fresh.string(), Mode::read);
+        CHECK(db.roots().empty());
+        CHECK(!db.first_directory());
+    }
+
+    // Other files are refused in both modes and left as they are.
+    const fs::path text = temp.path() / "notes.txt";
+    write_file(text, 100);
+    const fs::path empty = temp.path() / "empty.ducat";
+    write_file(empty, 0);
+    const fs::path foreign = temp.path() / "foreign.tkt";
+    {
+        tkrzw::TreeDBM dbm;
+        dbm.Open(foreign.string(), true);
+        dbm.Set("key", "value");
+        dbm.Close();
+    }
+    const fs::path other_version = temp.path() / "other.ducat";
+    {
+        tkrzw::TreeDBM dbm;
+        dbm.Open(other_version.string(), true);
+        dbm.Set(std::string("\x01" "format"), "ducat 0");
+        dbm.Close();
+    }
+    for (const fs::path& file : {text, empty, foreign, other_version}) {
+        const std::string before = read_file(file);
+        for (const Mode mode : {Mode::read, Mode::write}) {
+            const std::string error = open_error(file, mode);
+            CHECK(error.find(file == other_version ? "another version of ducat"
+                                                   : "not a ducat database")
+                  != std::string::npos);
+        }
+        CHECK(read_file(file) == before);
+    }
+    CHECK(open_error(temp.path(), Mode::read).find("is a directory") != std::string::npos);
+}
+
+void test_database_path_from_argument()
+{
+    TempDir temp;
+    const std::string home = temp.path().string();
+    setenv("HOME", home.c_str(), 1);
+    fs::create_directory(temp.path() / "drives");
+    const auto path = ducat::database_path_from_argument;
+
+    CHECK_EQ(path("~/my.ducat"), home + "/my.ducat");
+    CHECK_EQ(path("~"), home + "/drives.ducat"); // a directory
+    CHECK_EQ(path("~/drives"), home + "/drives/drives.ducat");
+    CHECK_EQ(path("~/new/"), home + "/new/drives.ducat");
+    CHECK_EQ(path("~other/x.ducat"), std::string("~other/x.ducat"));
+    CHECK_EQ(path("/tmp/a~b.ducat"), std::string("/tmp/a~b.ducat"));
+    CHECK_EQ(path("relative.ducat"), std::string("relative.ducat"));
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -348,6 +434,8 @@ int main()
     test_refresh_branch();
     test_roots();
     test_compact();
+    test_format();
+    test_database_path_from_argument();
     test_open_errors();
     return check::result();
 }

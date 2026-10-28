@@ -28,7 +28,9 @@ class Database {
 public:
     enum class Mode { read, write };
 
-    // Opens the file; in write mode creates it when missing.
+    // Opens the file; in write mode creates it when missing. Refuses, without
+    // changing it, a file that is not a ducat database or has the format of
+    // another ducat version; a new database records its format.
     Database(const std::string& file, Mode mode);
     ~Database();
 
@@ -107,9 +109,17 @@ private:
     std::unique_ptr<tkrzw::TreeDBM> dbm_;
 };
 
-// The default database file: ducat/ducat.tkt in $XDG_CACHE_HOME, or in
-// ~/.cache when that is not set.
+// The file name of a database given only by its directory.
+inline constexpr std::string_view default_database_name = "drives.ducat";
+
+// The default database file: siplasplas/ducat/drives.ducat in
+// $XDG_DATA_HOME, or in ~/.local/share when that is not set.
 std::string default_database_path();
+
+// The database file named by a -d argument: a leading "~" or "~/" stands for
+// $HOME, and a directory, given by a trailing '/' or existing as one, stands
+// for default_database_name in it.
+std::string database_path_from_argument(std::string_view argument);
 
 // The file-system part of a refresh, done without the database so that the
 // database is open only for the short apply_refresh.
