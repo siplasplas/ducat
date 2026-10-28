@@ -147,3 +147,10 @@ take well under a second:
 ```sh
 ctest --test-dir build --output-on-failure
 ```
+
+## License
+
+ducat is free software under the GNU Lesser General Public License, version 3
+or (at your option) any later version — see [COPYING.LESSER](COPYING.LESSER)
+and [COPYING](COPYING), the GNU General Public License it builds on. Other
+programs may so use the library `libducat`, for example its search.
