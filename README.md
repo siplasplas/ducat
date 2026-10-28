@@ -255,9 +255,11 @@ folder of the clicked half of a pair, in the main window; F3 views a copy. At
 most 10,000 groups or pairs are listed, the largest first.
 
 Copy (F5), Move (F6) and Move to Trash (F8) work there as among search
-matches, on the selected copies of files, or on one folder of each selected
-pair: the one on the side of the column holding the cursor. Trashing every
-copy of a file is asked about once more. Copies moved or trashed leave the
+matches, on the selected copies of files, or on the folders whose cells are
+selected: the Folder cell (or its Files and Disk usage) chooses the first
+folder of a pair, the Other folder cell the second, and Ctrl or Shift with a
+click adds more. Trashing every copy of a file, or moving or trashing both
+folders of a pair, is asked about once more. Copies moved or trashed leave the
 list, and so do groups left with a single copy and pairs with a folder gone.
 
 View (F3), in the main window and among search matches, shows the selected

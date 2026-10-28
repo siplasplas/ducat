@@ -27,6 +27,8 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
+#include <set>
+
 namespace {
 
 // More groups or pairs than this are counted but not listed.
@@ -105,13 +107,13 @@ DuplicatesDialog::DuplicatesDialog(MainWindow& window)
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     scope->addWidget(close, 0, Qt::AlignTop);
 
-    // File operations on the selected copies, or on one folder of each
-    // selected pair: the one in the half of the row holding the cursor.
+    // File operations on the selected copies of files, or on the folders
+    // whose cells are selected, the left or the right one of each pair.
     for (QTreeView* view : {files_view_, folders_view_})
         view->setSelectionMode(QAbstractItemView::ExtendedSelection);
     QHBoxLayout* operations = operation_buttons(
         this, {files_view_, folders_view_},
-        tr("Selected copies, or the folders on the cursor's side (Ctrl+A selects all):"),
+        tr("Selected copies of files, or folders by their Folder or Other folder cell:"),
         [this](EntryOperation operation) { operate(operation); });
 
     auto* layout = new QVBoxLayout(this);
@@ -214,6 +216,9 @@ QWidget* DuplicatesDialog::make_folders_tab()
     folders_view_ = make_view(tab, folders_proxy_);
     folders_view_->setRootIsDecorated(false);
     folders_view_->setSortingEnabled(true);
+    // Folders are chosen by their cells: the left or right one of a pair.
+    folders_view_->setSelectionBehavior(QAbstractItemView::SelectItems);
+    folders_view_->setAllColumnsShowFocus(false);
     make_columns_resizable(folders_view_, {2, 5});
     add_copy_menu(folders_view_);
     folders_status_ = new QLabel(tr("A folder is never paired with one inside it, and pairs "
@@ -402,12 +407,36 @@ void DuplicatesDialog::operate(EntryOperation operation)
                 entries.push_back({entry.path, entry.database});
         }
     } else {
-        const int column = view->currentIndex().column() >= 5 ? 5 : 2;
-        for (const QModelIndex& index : view->selectionModel()->selectedRows()) {
-            const Entry entry = entry_at(index.sibling(index.row(), column));
-            if (!entry.path.empty())
-                entries.push_back({entry.path, entry.database});
+        // The folders whose cells are selected: Folder and its columns for
+        // the first of a pair, Other folder and its columns for the second.
+        std::set<std::pair<int, int>> chosen; // source row, folder column
+        std::set<int> both;                   // rows with both folders chosen
+        for (const QModelIndex& index : view->selectionModel()->selectedIndexes()) {
+            if (index.column() < 2)
+                continue; // Similar, Shared: no folder
+            const int row = folders_proxy_->mapToSource(index).row();
+            const int column = index.column() >= 5 ? 5 : 2;
+            if (chosen.insert({row, column}).second && chosen.count({row, 7 - column}))
+                both.insert(row);
         }
+        for (const auto& [row, column] : chosen) {
+            const QModelIndex cell = folders_model_->index(row, column);
+            entries.push_back({cell.data(path_role).toString().toStdString(),
+                               cell.data(database_role).toString().toStdString()});
+        }
+        if (entries.empty()) {
+            folders_status_->setText(tr("Select the Folder or Other folder cell of the folders "
+                                        "to work on"));
+            return;
+        }
+        if (!both.empty() && operation != EntryOperation::copy
+            && QMessageBox::warning(this, tr("Duplicates"),
+                                    tr("Both folders of %n pairs are selected, so neither copy "
+                                       "would stay in place. Go on?",
+                                       nullptr, static_cast<int>(both.size())),
+                                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+                   != QMessageBox::Yes)
+            return;
     }
     if (entries.empty())
         return;

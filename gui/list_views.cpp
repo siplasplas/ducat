@@ -108,14 +108,16 @@ private:
     bool fitting_ = false;
 };
 
-// The selected rows below `parent` in the order shown, as lines of `columns`.
+// The rows below `parent` with a selected cell, in the order shown, as lines
+// of `columns`.
 void collect_rows(const QTreeView* view, const QModelIndex& parent, const QList<int>& columns,
                   QStringList& lines)
 {
     const QAbstractItemModel* model = view->model();
     const QItemSelectionModel* selection = view->selectionModel();
     for (int row = 0; row < model->rowCount(parent); ++row) {
-        if (selection->isRowSelected(row, parent)) {
+        // A row with any selected cell, for views selecting cells.
+        if (selection->rowIntersectsSelection(row, parent)) {
             QStringList cells;
             for (const int column : columns) {
                 QString cell = model->index(row, column, parent).data().toString();
