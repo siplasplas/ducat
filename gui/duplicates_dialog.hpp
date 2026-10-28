@@ -1,5 +1,6 @@
 #pragma once
 
+#include "entry_operations.hpp"
 #include "scope_selector.hpp"
 
 #include "ducat/duplicates.hpp"
@@ -60,6 +61,8 @@ private:
     // The stored entry a row stands for; an empty path for none.
     Entry entry_at(const QModelIndex& index) const;
     void open_entry(const Entry& entry);
+    // F5, F6, F8 on the selected copies or folders.
+    void operate(EntryOperation operation);
     void view_entry(const Entry& entry);
 
     MainWindow& window_;

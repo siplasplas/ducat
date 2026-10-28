@@ -16,6 +16,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QShortcut>
 #include <QSortFilterProxyModel>
@@ -74,7 +75,8 @@ QTreeView* make_view(QWidget* parent, QAbstractItemModel* model)
     view->setAllColumnsShowFocus(true);
     view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     view->setToolTip(QObject::tr("Enter or a double click shows the entry in the main window, "
-                                 "F3 shows a file when its drive is mounted"));
+                                 "F3 shows a file when its drive is mounted; F5, F6 and F8 "
+                                 "copy, move or trash the selected entries"));
     return view;
 }
 
@@ -102,9 +104,19 @@ DuplicatesDialog::DuplicatesDialog(MainWindow& window)
     connect(close, &QPushButton::clicked, this, &QDialog::close);
     scope->addWidget(close, 0, Qt::AlignTop);
 
+    // File operations on the selected copies, or on one folder of each
+    // selected pair: the one in the half of the row holding the cursor.
+    for (QTreeView* view : {files_view_, folders_view_})
+        view->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    QHBoxLayout* operations = operation_buttons(
+        this, {files_view_, folders_view_},
+        tr("Selected copies, or the folders on the cursor's side (Ctrl+A selects all):"),
+        [this](EntryOperation operation) { operate(operation); });
+
     auto* layout = new QVBoxLayout(this);
     layout->addLayout(scope);
     layout->addWidget(tabs_, 1);
+    layout->addLayout(operations);
 
     // Enter or a double click shows the entry, F3 views a file, in both lists.
     for (QTreeView* view : {files_view_, folders_view_}) {
@@ -375,6 +387,95 @@ DuplicatesDialog::Entry DuplicatesDialog::entry_at(const QModelIndex& index) con
     }
     return {cell.data(database_role).toString().toStdString(),
             cell.data(path_role).toString().toStdString()};
+}
+
+void DuplicatesDialog::operate(EntryOperation operation)
+{
+    const bool files = tabs_->currentIndex() == 0;
+    QTreeView* view = files ? files_view_ : folders_view_;
+    std::vector<StoredEntry> entries;
+    if (files) {
+        // Copies only: a group row stands for no single file.
+        for (const QModelIndex& index : view->selectionModel()->selectedRows()) {
+            const Entry entry = entry_at(index);
+            if (!entry.path.empty())
+                entries.push_back({entry.path, entry.database});
+        }
+    } else {
+        const int column = view->currentIndex().column() >= 5 ? 5 : 2;
+        for (const QModelIndex& index : view->selectionModel()->selectedRows()) {
+            const Entry entry = entry_at(index.sibling(index.row(), column));
+            if (!entry.path.empty())
+                entries.push_back({entry.path, entry.database});
+        }
+    }
+    if (entries.empty())
+        return;
+
+    // Trashing every copy of a file leaves none: asked about once more.
+    if (files && operation == EntryOperation::trash) {
+        int whole = 0;
+        for (int group = 0; group < files_model_->rowCount(); ++group) {
+            const QModelIndex parent = files_model_->index(group, 0);
+            const int copies = files_model_->rowCount(parent);
+            int chosen = 0;
+            for (int copy = 0; copy < copies; ++copy) {
+                if (view->selectionModel()->isRowSelected(copy, parent))
+                    ++chosen;
+            }
+            whole += copies > 0 && chosen == copies;
+        }
+        if (whole > 0
+            && QMessageBox::warning(this, tr("Move to Trash"),
+                                    tr("All copies of %n files are selected, so no copy of them "
+                                       "would be left. Go on?",
+                                       nullptr, whole),
+                                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+                   != QMessageBox::Yes)
+            return;
+    }
+
+    const EntryOperationOutcome outcome = operate_on_entries(this, window_, operation, entries);
+    if (outcome.message.isEmpty())
+        return;
+
+    // Entries that left their place leave the lists, as do groups with a
+    // single copy left and pairs with a folder gone; copied ones stay.
+    if (files) {
+        for (int group = files_model_->rowCount() - 1; group >= 0; --group) {
+            QStandardItem* name = files_model_->item(group, 0);
+            for (int copy = name->rowCount() - 1; copy >= 0; --copy) {
+                const std::string path =
+                    name->child(copy, 0)->data(path_role).toString().toStdString();
+                if (has_left(path, outcome.left))
+                    name->removeRow(copy);
+            }
+            const int copies = name->rowCount();
+            if (copies < 2) {
+                files_model_->removeRow(group);
+                continue;
+            }
+            const qulonglong size = files_model_->item(group, 1)->data(sort_role).toULongLong();
+            const qulonglong wasted = size * qulonglong(copies - 1);
+            files_model_->item(group, 2)->setText(count_text(qulonglong(copies)));
+            files_model_->item(group, 2)->setData(qulonglong(copies), sort_role);
+            files_model_->item(group, 3)->setText(size_text(wasted));
+            files_model_->item(group, 3)->setData(wasted, sort_role);
+        }
+        files_status_->setText(outcome.message);
+    } else {
+        for (int pair = folders_model_->rowCount() - 1; pair >= 0; --pair) {
+            for (const int column : {2, 5}) {
+                const std::string path =
+                    folders_model_->item(pair, column)->data(path_role).toString().toStdString();
+                if (has_left(path, outcome.left)) {
+                    folders_model_->removeRow(pair);
+                    break;
+                }
+            }
+        }
+        folders_status_->setText(outcome.message);
+    }
 }
 
 void DuplicatesDialog::open_entry(const Entry& entry)
