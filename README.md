@@ -136,7 +136,7 @@ rounded up to 512 bytes.
 `ducat find -a` and, in the GUI, Find with Also inside stored archives look
 into stored contents. In the GUI, Enter on an archive opens its stored
 contents, or else, with the archive plugin, reads the archive on disk and
-shows its contents without storing them; Refresh (F5) there stores them.
+shows its contents without storing them; Refresh (Ctrl+R) there stores them.
 Options > Read Archives When Scanning makes the GUI's scans store archives as
 `scan -a` does. The database format "ducat 2" for this reads older databases
 and marks them as format 2 when they are written.
@@ -186,14 +186,23 @@ them. Unchecked trees and the further databases are remembered; Only the
 shown folder looks below the folder shown in the main window instead. A match
 in another database opens that database in the main window.
 
-Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
-scans the shown directory again, which updates the directories above it as
+Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh
+(Ctrl+R) scans the shown directory again, which updates the directories above it as
 `ducat scan` does. Scans run in the background, with the number of entries
 read and, when refreshing, the progress against the stored count; the button
 next to them stops a scan without changing the database. Options > One File
 System, on by default, keeps scans from descending into other file systems.
 All actions are in the menus File, Go, Tools and Options; the toolbar holds
 the frequent ones.
+
+File operations change the disk and keep the database up to date, without
+scanning the whole folder again: New Folder (F7) creates a folder in the
+shown one, and Move to Trash (F8) moves the selected entries (Ctrl or Shift
+with a click selects several) to the desktop's trash, never deleting them for
+good. Both need the shown folder on disk, that is its drive mounted, and work
+neither inside archives nor during a scan. The library function
+`ducat::update_entry` brings one changed path up to date in a database, when
+the folder holding it is stored there.
 
 Duplicates… (Ctrl+Shift+D) finds probable duplicates among the stored entries
 as `ducat dups` does, also across drives and databases: files with the same

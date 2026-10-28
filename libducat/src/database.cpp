@@ -14,6 +14,8 @@
 #include <unordered_map>
 #include <utility>
 
+#include <sys/stat.h>
+
 namespace ducat {
 
 namespace {
@@ -255,6 +257,15 @@ void Database::remove(std::string_view path, const Node* parent)
     remove_tree(root);
     if (root != "/")
         replace_entry(root, nullptr, parent);
+}
+
+void Database::store_entry(std::string_view path, const Node* entry, const Node* parent)
+{
+    const std::string file = normalize_path(path);
+    if (file == "/")
+        throw DatabaseError("/ is not a file");
+    remove_tree(file);
+    replace_entry(file, entry, parent);
 }
 
 void Database::store_directory(const Node& dir, const std::string& path)
@@ -777,6 +788,42 @@ RefreshResult apply_refresh(Database& db, PreparedRefresh prepared)
 RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options)
 {
     return apply_refresh(db, prepare_refresh(path, options));
+}
+
+bool update_entry(Database& db, std::string_view path, const ScanOptions& options)
+{
+    const std::string entry_path = normalize_path(path);
+    if (entry_path == "/")
+        return false;
+    const std::string dir = split_path(entry_path).first;
+    if (!db.read_directory(dir))
+        return false;
+    // Checked on disk, as the stored contents of an archive look like a
+    // directory too.
+    const std::optional<Node> parent = stat_directory(dir);
+    if (!parent)
+        return false;
+
+    struct stat st;
+    if (lstat(entry_path.c_str(), &st) != 0) {
+        if (errno != ENOENT && errno != ENOTDIR)
+            throw std::system_error(errno, std::generic_category(), entry_path);
+        db.store_entry(entry_path, nullptr, &*parent);
+    } else if (S_ISDIR(st.st_mode)) {
+        ScanResult scan = scan_tree(entry_path, options);
+        db.store(scan, &*parent);
+    } else {
+        Node entry;
+        entry.name = split_path(entry_path).second;
+        entry.size = static_cast<std::uint64_t>(st.st_size);
+        entry.disk = static_cast<std::uint64_t>(st.st_blocks) * 512;
+        entry.modified = st.st_mtim.tv_sec;
+        entry.total_size = entry.size;
+        entry.total_disk = entry.disk;
+        db.store_entry(entry_path, &entry, &*parent);
+    }
+    db.compact();
+    return true;
 }
 
 } // namespace ducat

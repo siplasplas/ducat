@@ -256,6 +256,53 @@ void test_refresh_branch()
     check_matches_full_scan(db, root);
 }
 
+void test_update_entry()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    const std::string db_file = (temp.path() / "test.tkt").string();
+
+    ducat::Database db(db_file, ducat::Database::Mode::write);
+    ducat::refresh(db, root.string());
+
+    // A new file, in an extra segment of its directory.
+    write_file(root / "big" / "new", 4321);
+    CHECK(ducat::update_entry(db, (root / "big" / "new").string()));
+    check_matches_full_scan(db, root);
+
+    // A changed file, then a removed one.
+    write_file(root / "sub" / "a", 9999);
+    CHECK(ducat::update_entry(db, (root / "sub" / "a").string()));
+    check_matches_full_scan(db, root);
+    fs::remove(root / "big" / "f3");
+    CHECK(ducat::update_entry(db, (root / "big" / "f3").string()));
+    check_matches_full_scan(db, root);
+
+    // A new directory with files, then a removed one.
+    fs::create_directories(root / "sub" / "made" / "in");
+    write_file(root / "sub" / "made" / "in" / "x", 50);
+    CHECK(ducat::update_entry(db, (root / "sub" / "made").string()));
+    check_matches_full_scan(db, root);
+    fs::remove_all(root / "sub" / "deep");
+    CHECK(ducat::update_entry(db, (root / "sub" / "deep").string()));
+    check_matches_full_scan(db, root);
+    CHECK(!db.read_directory((root / "sub" / "deep").string()));
+
+    // A directory replaced by a file leaves no records below.
+    fs::remove_all(root / "sub" / "made");
+    write_file(root / "sub" / "made", 7);
+    CHECK(ducat::update_entry(db, (root / "sub" / "made").string()));
+    check_matches_full_scan(db, root);
+    CHECK(!db.read_directory((root / "sub" / "made" / "in").string()));
+
+    // Outside the stored trees nothing changes.
+    write_file(temp.path() / "outside", 10);
+    CHECK(!ducat::update_entry(db, (temp.path() / "outside").string()));
+    CHECK(!ducat::update_entry(db, (root / "missing-dir" / "x").string()));
+    check_matches_full_scan(db, root);
+}
+
 void test_roots()
 {
     TempDir temp;
@@ -594,6 +641,7 @@ int main()
     test_store_and_load();
     test_rescan_and_remove();
     test_refresh_branch();
+    test_update_entry();
     test_roots();
     test_compact();
     test_format();

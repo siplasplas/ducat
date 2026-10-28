@@ -114,8 +114,19 @@ private:
     void show_directory(ducat::Node dir, const std::string& select);
     // Reads the archive at `path` from disk and shows its contents, unstored.
     void open_archive(const std::string& path);
-    // F5: scans the shown directory again, or stores the archive read from disk.
+    // Ctrl+R: scans the shown directory again, or stores the archive read
+    // from disk.
     void refresh();
+    // F7: creates a folder in the shown one.
+    void new_folder();
+    // F8: moves the selected entries to the trash.
+    void move_to_trash();
+    // Whether the shown folder can be changed on disk now; else explains in
+    // the status bar.
+    bool check_on_disk();
+    // Brings the entries at `paths` up to date in the database after a file
+    // operation (see ducat::update_entry); explains a failure.
+    bool update_entries(const std::vector<std::string>& paths);
     void store_live_archive();
     // Removes the stored contents of the archives below the shown folder.
     void strip_archives();

@@ -17,9 +17,11 @@
 #include <QAction>
 #include <QApplication>
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QIcon>
+#include <QInputDialog>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -93,9 +95,21 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
 
     refresh_action_ = file_menu->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
                                            tr("&Refresh"), this, &MainWindow::refresh);
-    refresh_action_->setShortcut(QKeySequence::Refresh);
+    // F5 is kept free for copying, as in two-panel file managers.
+    refresh_action_->setShortcut(Qt::CTRL | Qt::Key_R);
     refresh_action_->setToolTip(tr("Scan the shown directory again, or store the archive read "
-                                   "from disk (F5)"));
+                                   "from disk (Ctrl+R)"));
+
+    file_menu->addSeparator();
+    QAction* new_folder = file_menu->addAction(icon("folder-new", QStyle::SP_FileDialogNewFolder),
+                                               tr("&New Folder…"), this, &MainWindow::new_folder);
+    new_folder->setShortcut(Qt::Key_F7);
+    new_folder->setToolTip(tr("Create a folder in the shown one, on disk and in the database (F7)"));
+    QAction* trash = file_menu->addAction(icon("user-trash", QStyle::SP_TrashIcon),
+                                          tr("Move to &Trash…"), this, &MainWindow::move_to_trash);
+    trash->setShortcut(Qt::Key_F8);
+    trash->setToolTip(tr("Move the selected entries to the trash and remove them from the "
+                         "database (F8)"));
 
     strip_action_ = file_menu->addAction(tr("Remove Archive &Contents Here…"), this,
                                          &MainWindow::strip_archives);
@@ -185,6 +199,7 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
 
     view_->setModel(model_);
     view_->setRootIsDecorated(false);
+    view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
     view_->setUniformRowHeights(true);
     view_->setAllColumnsShowFocus(true);
     view_->setSortingEnabled(true);
@@ -255,8 +270,8 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
         ducat::Node dir = *node;
         dir.name = path;
         show_directory(std::move(dir), select);
-        statusBar()->showMessage(tr("Read from the archive on disk, not stored; Refresh (F5) "
-                                    "stores it"));
+        statusBar()->showMessage(tr("Read from the archive on disk, not stored; Refresh "
+                                    "(Ctrl+R) stores it"));
         return true;
     }
     live_.reset();
@@ -384,6 +399,136 @@ void MainWindow::open_in_gemini_commander()
         else
             show_error(error);
     });
+}
+
+bool MainWindow::check_on_disk()
+{
+    if (current_.empty())
+        return false;
+    if (scan_thread_.joinable()) {
+        show_error(tr("Wait for the scan to end"));
+        return false;
+    }
+    if ((live_ && (current_ == live_->path || is_inside(current_, live_->path)))
+        || inside_contents(current_)) {
+        show_error(tr("Files inside an archive cannot be changed"));
+        return false;
+    }
+    if (!QFileInfo(to_qstring(current_)).isDir()) {
+        show_error(tr("%1 is not on disk now: its drive is not mounted, or it is gone")
+                       .arg(to_qstring(current_)));
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::update_entries(const std::vector<std::string>& paths)
+{
+    const std::unique_lock lock(database_mutex_, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        show_error(tr("The database is being written; refresh the folder later"));
+        return false;
+    }
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    try {
+        ducat::Database db(database_, ducat::Database::Mode::write);
+        ducat::ScanOptions options;
+        options.one_file_system = one_file_system_action_->isChecked();
+        for (const std::string& path : paths)
+            ducat::update_entry(db, path, options);
+        db.close();
+    } catch (const std::exception& e) {
+        QApplication::restoreOverrideCursor();
+        show_error(tr("The database was not updated: %1").arg(QString::fromUtf8(e.what())));
+        return false;
+    }
+    QApplication::restoreOverrideCursor();
+    return true;
+}
+
+void MainWindow::new_folder()
+{
+    if (!check_on_disk())
+        return;
+    bool ok = false;
+    const QString name =
+        QInputDialog::getText(this, tr("New Folder"), tr("Name of the new folder in %1:")
+                                                          .arg(to_qstring(current_)),
+                              QLineEdit::Normal, QString(), &ok)
+            .trimmed();
+    if (!ok || name.isEmpty())
+        return;
+    if (name.contains(QLatin1Char('/')) || name == QLatin1String(".")
+        || name == QLatin1String("..")) {
+        show_error(tr("%1 is not a valid folder name").arg(name));
+        return;
+    }
+    QDir dir(to_qstring(current_));
+    if (dir.exists(name)) {
+        show_error(tr("%1 already exists").arg(dir.filePath(name)));
+        return;
+    }
+    if (!dir.mkdir(name)) {
+        show_error(tr("Cannot create %1").arg(dir.filePath(name)));
+        return;
+    }
+    const std::string path = ducat::join_path(current_, name.toStdString());
+    update_entries({path});
+    open_directory(current_, name.toStdString());
+    statusBar()->showMessage(tr("Created %1").arg(to_qstring(path)));
+}
+
+void MainWindow::move_to_trash()
+{
+    if (!check_on_disk())
+        return;
+    std::vector<std::string> names;
+    for (const QModelIndex& index : view_->selectionModel()->selectedRows())
+        names.push_back(model_->entry(index.row()).name);
+    if (names.empty())
+        return;
+
+    QString question;
+    if (names.size() == 1) {
+        question = tr("Move %1 to the trash?").arg(to_qstring(ducat::join_path(current_, names[0])));
+    } else {
+        QStringList shown;
+        for (std::size_t i = 0; i < names.size() && i < 10; ++i)
+            shown << to_qstring(names[i]);
+        if (names.size() > 10)
+            shown << QStringLiteral("…");
+        question = tr("Move %n entries of %1 to the trash?", nullptr, static_cast<int>(names.size()))
+                       .arg(to_qstring(current_))
+                   + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'));
+    }
+    if (QMessageBox::question(this, tr("Move to Trash"), question) != QMessageBox::Yes)
+        return;
+
+    // The entry after the last selected one gets the selection.
+    int last_row = 0;
+    for (const QModelIndex& index : view_->selectionModel()->selectedRows())
+        last_row = std::max(last_row, index.row());
+    const QModelIndex next = view_->model()->index(last_row + 1, 0);
+    std::string select = next.isValid() ? model_->entry(next.row()).name : std::string();
+
+    std::vector<std::string> trashed;
+    QStringList failed;
+    for (const std::string& name : names) {
+        const std::string path = ducat::join_path(current_, name);
+        if (QFile::moveToTrash(to_qstring(path)))
+            trashed.push_back(path);
+        else
+            failed << to_qstring(name);
+        if (name == select)
+            select.clear();
+    }
+    update_entries(trashed);
+    open_directory(current_, select);
+    if (failed.isEmpty())
+        statusBar()->showMessage(tr("Moved %n entries to the trash", nullptr,
+                                    static_cast<int>(trashed.size())));
+    else
+        show_error(tr("Could not move to the trash: %1").arg(failed.join(QStringLiteral(", "))));
 }
 
 void MainWindow::strip_archives()

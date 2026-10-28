@@ -64,6 +64,13 @@ public:
     // totals of all stored directories above. `parent` is as for store.
     void remove(std::string_view path, const Node* parent = nullptr);
 
+    // Replaces the entry at `path` in the stored directory above with
+    // `entry`, a file or other non-directory, or removes the entry when
+    // `entry` is null, together with any records stored under `path` (a
+    // directory or the contents of an archive), and updates the totals of
+    // the stored directories above. `parent` is as for store.
+    void store_entry(std::string_view path, const Node* entry, const Node* parent = nullptr);
+
     // Removes the records of the directory at `path` and of all directories
     // below it, without touching the directories above.
     void remove_tree(std::string_view path);
@@ -200,5 +207,14 @@ RefreshResult apply_refresh(Database& db, PreparedRefresh prepared);
 
 // prepare_refresh followed by apply_refresh.
 RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options = {});
+
+// Brings the entry at `path` up to date after a file operation, such as
+// creating, deleting, copying or moving it: a directory there is scanned and
+// stored, a file's entry is replaced, and an entry that is gone is removed,
+// with the totals above updated. Does nothing when the directory above
+// `path` is not stored, or is not a directory on disk now (an archive, or
+// an unmounted drive). `path` is normalized, not resolved. Returns whether
+// the database changed.
+bool update_entry(Database& db, std::string_view path, const ScanOptions& options = {});
 
 } // namespace ducat
