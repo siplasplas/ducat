@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <charconv>
 #include <set>
+#include <unordered_set>
 #include <ctime>
 #include <optional>
 
@@ -473,12 +474,32 @@ void SearchDialog::operate(Operation operation)
         window_.update_entries(changed, database);
     window_.reload_shown();
 
+    // Matches that left their place, also unselected ones inside a folder
+    // that did, leave the list; copied ones stay.
+    std::unordered_set<std::string> left;
+    for (const std::string& path : gone) {
+        if (!QFileInfo::exists(QString::fromStdString(path)))
+            left.insert(path);
+    }
+    const int first_row = selected.front().row();
+    const std::size_t removed =
+        model_->remove_rows_if([&](const DirectoryModel::Row& row) {
+            for (std::string path = ducat::join_path(row.folder, row.entry.name);;) {
+                if (left.contains(path))
+                    return true;
+                if (path == "/")
+                    return false;
+                path = parent_of(path);
+            }
+        });
+    if (removed > 0 && model_->rowCount() > 0)
+        view_->setCurrentIndex(model_->index(std::min(first_row, model_->rowCount() - 1), 0));
+
     if (!problems.isEmpty())
         message += tr("; %n problems", nullptr, static_cast<int>(problems.size()));
     show_problems(this, tr("Find"), problems);
-    // The list shows the stored state again.
-    run_search();
-    status_->setText(message + QStringLiteral("; ") + status_->text());
+    status_->setText(message
+                     + tr("; %n matches listed", nullptr, static_cast<int>(model_->rowCount())));
 }
 
 void SearchDialog::open_result(const QModelIndex& index)

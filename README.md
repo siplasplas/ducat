@@ -187,8 +187,8 @@ name go into subfolders named after the folders holding them:
 `abc/a/name1` and `def/b/name1` become `DIR/a/name1` and `DIR/b/name1`, and
 when those names repeat too, `DIR/a_1/name1` and `DIR/a_2/name1`. Each
 database searched, and the shown one, is updated where it stores the folders
-concerned, and the search is run again. F4 edits a match, updating its
-database on saving.
+concerned. Matches moved or trashed leave the list, with those inside them;
+copied ones stay. F4 edits a match, updating its database on saving.
 
 Both Find and Duplicates look in the trees checked under Look in: the stored
 trees of the shown database and of further databases, e.g. one of the home

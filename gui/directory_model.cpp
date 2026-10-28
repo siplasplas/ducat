@@ -65,6 +65,14 @@ void DirectoryModel::set_rows(std::vector<Row> rows)
     endResetModel();
 }
 
+std::size_t DirectoryModel::remove_rows_if(const std::function<bool(const Row&)>& drop)
+{
+    beginResetModel();
+    const std::size_t removed = std::erase_if(rows_, drop);
+    endResetModel();
+    return removed;
+}
+
 int DirectoryModel::row_of(const std::string& name) const
 {
     const auto it = std::find_if(rows_.begin(), rows_.end(),

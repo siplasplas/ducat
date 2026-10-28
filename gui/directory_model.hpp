@@ -4,6 +4,7 @@
 
 #include <QAbstractTableModel>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -32,6 +33,9 @@ public:
 
     // Shows entries from any directories, e.g. search results.
     void set_rows(std::vector<Row> rows);
+
+    // Drops the rows for which `drop` returns true; returns how many.
+    std::size_t remove_rows_if(const std::function<bool(const Row&)>& drop);
 
     const ducat::Node& entry(int row) const { return rows_[static_cast<std::size_t>(row)].entry; }
     const std::string& folder(int row) const { return rows_[static_cast<std::size_t>(row)].folder; }
