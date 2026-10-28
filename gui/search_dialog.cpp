@@ -305,17 +305,22 @@ void SearchDialog::operate(EntryOperation operation)
                            model_->database(index.row())});
 
     const EntryOperationOutcome outcome = operate_on_entries(this, window_, operation, entries);
+    view_->setFocus();
     if (outcome.message.isEmpty())
         return;
 
     // Matches that left their place, also unselected ones inside a folder
-    // that did, leave the list; copied ones stay.
+    // that did, leave the list; copied ones stay. The match now in the place
+    // of the first one gone gets the cursor.
     const int first_row = selected.front().row();
     const std::size_t removed = model_->remove_rows_if([&](const DirectoryModel::Row& row) {
         return has_left(ducat::join_path(row.folder, row.entry.name), outcome.left);
     });
-    if (removed > 0 && model_->rowCount() > 0)
-        view_->setCurrentIndex(model_->index(std::min(first_row, model_->rowCount() - 1), 0));
+    if (removed > 0 && model_->rowCount() > 0) {
+        const QModelIndex next = model_->index(std::min(first_row, model_->rowCount() - 1), 0);
+        view_->setCurrentIndex(next);
+        view_->scrollTo(next);
+    }
     status_->setText(outcome.message
                      + tr("; %n matches listed", nullptr, static_cast<int>(model_->rowCount())));
 }

@@ -172,6 +172,9 @@ private:
     // Help > About: the version, the commit built and where it runs from.
     void show_about();
     std::string selected_name() const;
+    // The entry to select once the selected ones are gone: the next one
+    // shown, else the one before them; empty when none is left.
+    std::string neighbour_of_selection() const;
 
     std::string database_;
     std::string current_;   // shown directory, empty before the first one

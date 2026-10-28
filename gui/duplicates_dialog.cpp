@@ -28,7 +28,9 @@
 #include <QTreeView>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <set>
+#include <tuple>
 
 namespace {
 
@@ -463,13 +465,35 @@ void DuplicatesDialog::operate(EntryOperation operation)
             return;
     }
 
+    // Where the cursor goes afterwards: the place of the first selected entry,
+    // as group and copy, or as pair row and folder column.
+    QModelIndex first_selected;
+    for (const QModelIndex& index : view->selectionModel()->selectedIndexes()) {
+        const auto key = [&](const QModelIndex& i) {
+            const QModelIndex parent = i.parent();
+            return std::tuple(parent.isValid() ? parent.row() : i.row(),
+                              parent.isValid() ? i.row() : -1, i.column());
+        };
+        if (!first_selected.isValid() || key(index) < key(first_selected))
+            first_selected = index;
+    }
+    const int place_group = first_selected.parent().isValid() ? first_selected.parent().row()
+                                                              : first_selected.row();
+    const int place_copy = first_selected.parent().isValid() ? first_selected.row() : 0;
+    const int place_column = first_selected.column();
+
     const EntryOperationOutcome outcome = operate_on_entries(this, window_, operation, entries);
+    view->setFocus();
     if (outcome.message.isEmpty())
         return;
 
     // Entries that left their place leave the lists, as do groups with a
-    // single copy left and pairs with a folder gone; copied ones stay.
+    // single copy left and pairs with a folder gone; copied ones stay. The
+    // cursor stays in place: on the next copy, or the next group when the
+    // whole group went, or the next pair.
     if (files) {
+        int groups_gone_before = 0;
+        bool place_gone = false;
         for (int group = files_model_->rowCount() - 1; group >= 0; --group) {
             QStandardItem* name = files_model_->item(group, 0);
             for (int copy = name->rowCount() - 1; copy >= 0; --copy) {
@@ -481,6 +505,9 @@ void DuplicatesDialog::operate(EntryOperation operation)
             const int copies = name->rowCount();
             if (copies < 2) {
                 files_model_->removeRow(group);
+                if (group < place_group)
+                    ++groups_gone_before;
+                place_gone = place_gone || group == place_group;
                 continue;
             }
             const qulonglong size = files_model_->item(group, 1)->data(sort_role).toULongLong();
@@ -489,6 +516,16 @@ void DuplicatesDialog::operate(EntryOperation operation)
             files_model_->item(group, 2)->setData(qulonglong(copies), sort_role);
             files_model_->item(group, 3)->setText(size_text(wasted));
             files_model_->item(group, 3)->setData(wasted, sort_role);
+        }
+        const int groups = files_model_->rowCount();
+        if (groups > 0) {
+            const int group = std::min(place_group - groups_gone_before, groups - 1);
+            const QModelIndex parent = files_model_->index(group, 0);
+            const int copies = files_model_->rowCount(parent);
+            const QModelIndex next =
+                files_model_->index(place_gone ? 0 : std::min(place_copy, copies - 1), 0, parent);
+            files_view_->setCurrentIndex(next);
+            files_view_->scrollTo(next);
         }
         files_status_->setText(outcome.message);
     } else {
@@ -501,6 +538,13 @@ void DuplicatesDialog::operate(EntryOperation operation)
                     break;
                 }
             }
+        }
+        const int pairs = folders_proxy_->rowCount();
+        if (pairs > 0 && outcome.left.size() > 0) {
+            const QModelIndex next =
+                folders_proxy_->index(std::min(place_group, pairs - 1), place_column);
+            folders_view_->setCurrentIndex(next);
+            folders_view_->scrollTo(next);
         }
         folders_status_->setText(outcome.message);
     }

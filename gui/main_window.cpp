@@ -536,13 +536,7 @@ void MainWindow::move_to_trash()
     if (!confirm(this, tr("Move to Trash"), question))
         return;
 
-    // The entry after the last selected one gets the selection.
-    int last_row = 0;
-    for (const QModelIndex& index : view_->selectionModel()->selectedRows())
-        last_row = std::max(last_row, index.row());
-    const QModelIndex next = view_->model()->index(last_row + 1, 0);
-    std::string select = next.isValid() ? model_->entry(next.row()).name : std::string();
-
+    const std::string select = neighbour_of_selection();
     std::vector<std::string> trashed;
     QStringList failed;
     for (const std::string& name : names) {
@@ -551,8 +545,6 @@ void MainWindow::move_to_trash()
             trashed.push_back(path);
         else
             failed << to_qstring(name);
-        if (name == select)
-            select.clear();
     }
     update_entries(trashed);
     open_directory(current_, select);
@@ -579,6 +571,7 @@ void MainWindow::transfer(TransferKind kind)
     if (names.empty())
         return;
     const bool copying = kind == TransferKind::copy;
+    const std::string moved_select = neighbour_of_selection();
 
     // Offered: the destination used last, while it exists.
     const QString key = QStringLiteral("files/destination");
@@ -661,7 +654,7 @@ void MainWindow::transfer(TransferKind kind)
             changed.push_back(item.target);
     }
     update_entries(changed);
-    open_directory(current_, copying ? names[0] : std::string());
+    open_directory(current_, copying ? names[0] : moved_select);
 
     QStringList problems = skipped;
     for (const std::string& error : result.errors)
@@ -1271,6 +1264,29 @@ void MainWindow::open_typed_path()
     const QString text = path_edit_->text().trimmed();
     if (!text.isEmpty())
         open_directory(ducat::resolve_path(text.toStdString()));
+}
+
+std::string MainWindow::neighbour_of_selection() const
+{
+    // The first entry after the last selected one, else the last before
+    // the first selected one, as shown.
+    const QItemSelectionModel* selection = view_->selectionModel();
+    const int rows = model_->rowCount();
+    int first = rows;
+    int last = -1;
+    for (const QModelIndex& index : selection->selectedRows()) {
+        first = std::min(first, index.row());
+        last = std::max(last, index.row());
+    }
+    for (int row = last + 1; row < rows; ++row) {
+        if (!selection->isRowSelected(row, {}))
+            return model_->entry(row).name;
+    }
+    for (int row = first - 1; row >= 0; --row) {
+        if (!selection->isRowSelected(row, {}))
+            return model_->entry(row).name;
+    }
+    return {};
 }
 
 std::string MainWindow::selected_name() const
