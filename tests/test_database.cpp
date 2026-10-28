@@ -303,6 +303,66 @@ void test_update_entry()
     check_matches_full_scan(db, root);
 }
 
+void test_spilled_scan()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root); // big/ with 70 files: records with segments
+    fs::create_directories(root / "sub" / "deep" / "empty");
+    write_file(root / "sub" / "deep" / "pack.zip", 3000);
+    write_file(root / "top.zip", 2000);
+    const fs::path inside = temp.path() / "inside";
+    fs::create_directories(inside / "docs");
+    write_file(inside / "docs" / "readme.txt", 500);
+    const ducat::ScanResult contents = ducat::scan_tree(inside.string());
+
+    ducat::ScanOptions options;
+    options.spill_directory = temp.path().string();
+    // The scan keeps only the root's entries; the rest is written out.
+    const ducat::ScanResult spilled = ducat::scan_tree(root.string(), options);
+    CHECK(spilled.spilled != nullptr);
+    for (const ducat::Node& child : spilled.root.children)
+        CHECK(child.children.empty());
+    const ducat::ScanResult whole = ducat::scan_tree(root.string());
+    CHECK_EQ(spilled.root.files, whole.root.files);
+    CHECK_EQ(spilled.root.total_disk, whole.root.total_disk);
+
+    ducat::Database db((temp.path() / "test.ducat").string(), ducat::Database::Mode::write);
+    db.store(spilled);
+    check_matches_full_scan(db, root);
+    // A branch, also through refresh.
+    write_file(root / "big" / "added", 1234);
+    ducat::refresh(db, (root / "big").string(), options);
+    check_matches_full_scan(db, root);
+
+    // Contents given during the scan, below the root and in it, are stored.
+    options.on_directory = [&](const std::string&, ducat::Node& dir) {
+        for (ducat::Node& child : dir.children) {
+            if (child.name.ends_with(".zip")) {
+                child.has_contents = true;
+                child.children = {contents.root};
+            }
+        }
+    };
+    ducat::refresh(db, root.string(), options);
+    check_matches_full_scan(db, root);
+    for (const fs::path& archive : {root / "sub" / "deep" / "pack.zip", root / "top.zip"}) {
+        CHECK(db.read_directory((archive / "docs").string()).has_value());
+        check_stored(db, contents.root, archive.string());
+    }
+
+    // Scanned again without reading archives, the unchanged ones keep theirs.
+    options.on_directory = nullptr;
+    ducat::refresh(db, root.string(), options);
+    check_matches_full_scan(db, root);
+    CHECK(db.read_directory((root / "sub" / "deep" / "pack.zip" / "docs").string()).has_value());
+    CHECK(db.read_directory((root / "top.zip" / "docs").string()).has_value());
+    write_file(root / "sub" / "deep" / "pack.zip", 3500); // changed: contents go
+    ducat::refresh(db, root.string(), options);
+    CHECK(!db.read_directory((root / "sub" / "deep" / "pack.zip").string()).has_value());
+    CHECK(db.read_directory((root / "top.zip" / "docs").string()).has_value());
+}
+
 void test_roots()
 {
     TempDir temp;
@@ -642,6 +702,7 @@ int main()
     test_rescan_and_remove();
     test_refresh_branch();
     test_update_entry();
+    test_spilled_scan();
     test_roots();
     test_compact();
     test_format();

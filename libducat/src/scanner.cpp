@@ -1,5 +1,7 @@
 #include "ducat/scanner.hpp"
 
+#include "ducat/spill.hpp"
+
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
@@ -82,7 +84,7 @@ struct DirTask {
 class Scanner {
 public:
     Scanner(const ScanOptions& options, ScanResult& result, dev_t root_dev)
-        : options_(options), result_(result), root_dev_(root_dev)
+        : options_(options), result_(result), root_dev_(root_dev), spilled_(result.spilled.get())
     {
     }
 
@@ -209,6 +211,8 @@ private:
             init_node(child, st);
             if (child.is_dir && !(options_.one_file_system && st.st_dev != root_dev_))
                 subdirs.push_back(node.children.size() - 1);
+            else if (child.is_dir && spilled_)
+                spilled_->add(join(task.path, name), child); // stored empty, as in memory
         }
 
         if (ScanProgress* progress = options_.progress) {
@@ -256,7 +260,13 @@ private:
                     node.files += 1;
                 }
             }
+            if (options_.on_directory)
+                options_.on_directory(task->path, node);
             DirTask* parent = task->parent;
+            if (spilled_ && parent) {
+                spilled_->add(task->path, node);
+                std::string().swap(task->path);
+            }
             if (!parent || parent->pending.fetch_sub(1, std::memory_order_acq_rel) != 1)
                 return;
             task = parent;
@@ -272,6 +282,7 @@ private:
     const ScanOptions& options_;
     ScanResult& result_;
     const dev_t root_dev_;
+    SpilledDirectories* const spilled_; // null when the tree stays in memory
 
     std::mutex mutex_;                 // guards the fields below up to failure_
     std::condition_variable wake_;
@@ -314,6 +325,14 @@ ScanResult scan_tree(const std::string& path, const ScanOptions& options)
         raise_open_file_limit();
 
     ScanResult result;
+    if (!options.spill_directory.empty()) {
+        try {
+            result.spilled = std::make_shared<SpilledDirectories>(options.spill_directory, path);
+        } catch (...) {
+            close(fd);
+            throw;
+        }
+    }
     Scanner scanner(options, result, st.st_dev);
     result.root.name = path;
     scanner.init_node(result.root, st);

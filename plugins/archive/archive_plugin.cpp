@@ -18,10 +18,11 @@ public:
         return ducat::list_archive(path, error);
     }
 
-    std::vector<std::pair<std::string, std::string>> read_archives(ducat::ScanResult& scan) override
+    std::vector<std::pair<std::string, std::string>> read_archives_in(const std::string& path,
+                                                                      ducat::Node& dir) override
     {
         std::vector<std::pair<std::string, std::string>> errors;
-        for (ducat::ArchiveError& error : ducat::read_archives(scan))
+        for (ducat::ArchiveError& error : ducat::read_archives_in(path, dir))
             errors.emplace_back(std::move(error.path), std::move(error.message));
         return errors;
     }

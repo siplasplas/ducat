@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cstdint>
 #include <exception>
+#include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -56,6 +58,17 @@ struct ScanOptions {
     unsigned threads = 0;
     // Updated after each directory when set; must outlive the scan.
     ScanProgress* progress = nullptr;
+    // Called for each directory, the root included, once it and all below
+    // it are complete, with its path and node, on any scan thread and
+    // possibly for several at once; it may give files contents (e.g. read
+    // archives, see Node::has_contents), but not change the totals.
+    std::function<void(const std::string& path, Node& dir)> on_directory;
+    // When not empty, the directories below the root are written to a
+    // temporary file in this directory as they complete (ScanResult::spilled)
+    // and keep only their entry in the directory above, so that a large tree
+    // does not have to fit in memory; the root keeps its entries. Best on a
+    // disk, not in a tmpfs, e.g. the directory of the database.
+    std::string spill_directory;
 };
 
 // The default number of scan threads for this machine.
@@ -66,9 +79,14 @@ struct ScanError {
     int error = 0;                 // errno value
 };
 
+class SpilledDirectories;
+
 struct ScanResult {
     Node root;                     // root.name is the path as given
     std::vector<ScanError> errors; // entries that could not be read
+    // The directories below the root, with ScanOptions::spill_directory;
+    // their nodes in `root` then have no children.
+    std::shared_ptr<SpilledDirectories> spilled;
 };
 
 // Scans the directory tree at `path` into memory, with several threads (see

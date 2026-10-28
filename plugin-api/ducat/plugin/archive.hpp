@@ -26,12 +26,14 @@ public:
     // ducat/archive_reader.hpp), or returns nullopt and sets `error`.
     virtual std::optional<Node> list(const std::string& path, std::string& error) = 0;
 
-    // Gives the archives of a scan their contents (see read_archives);
-    // returns the unreadable ones with their messages. May run on any thread.
-    virtual std::vector<std::pair<std::string, std::string>> read_archives(ScanResult& scan) = 0;
+    // Gives the archives directly in `dir`, the scanned directory at `path`,
+    // their contents (see read_archives_in); returns the unreadable ones
+    // with their messages. Runs on scan threads, several at once.
+    virtual std::vector<std::pair<std::string, std::string>> read_archives_in(
+        const std::string& path, Node& dir) = 0;
 };
 
 } // namespace ducat
 
-#define DUCAT_ARCHIVE_PLUGIN_IID "io.github.siplasplas.ducat.ArchivePlugin/1"
+#define DUCAT_ARCHIVE_PLUGIN_IID "io.github.siplasplas.ducat.ArchivePlugin/2"
 Q_DECLARE_INTERFACE(ducat::ArchivePlugin, DUCAT_ARCHIVE_PLUGIN_IID)

@@ -30,4 +30,8 @@ struct ArchiveError {
 // could not be read.
 std::vector<ArchiveError> read_archives(ScanResult& scan);
 
+// As read_archives, for the files directly in `dir`, the directory at `path`;
+// for ScanOptions::on_directory, so that archives are read during the scan.
+std::vector<ArchiveError> read_archives_in(const std::string& path, Node& dir);
+
 } // namespace ducat

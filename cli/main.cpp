@@ -19,6 +19,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -206,20 +207,30 @@ int run_scan(int argc, char* argv[], int first)
                                         ignored);
     ducat::Database db(line.database, ducat::Database::Mode::write);
 
+    // Directories go to a temporary file next to the database as they are
+    // scanned, so that a large tree need not fit in memory.
+    ducat::ScanOptions options = line.scan;
+    const std::string database_dir = std::filesystem::path(line.database).parent_path().string();
+    options.spill_directory = database_dir.empty() ? std::string(".") : database_dir;
+    std::size_t archive_errors = 0;
+#ifdef DUCAT_HAVE_ARCHIVES
+    // Archives are read as their directories complete, on the scan threads.
+    std::mutex archive_mutex;
+    if (line.archives) {
+        options.on_directory = [&](const std::string& path, ducat::Node& dir) {
+            const std::vector<ducat::ArchiveError> errors = ducat::read_archives_in(path, dir);
+            const std::lock_guard lock(archive_mutex);
+            for (const ducat::ArchiveError& error : errors)
+                std::cerr << "ducat: " << error.path << ": " << error.message << '\n';
+            archive_errors += errors.size();
+        };
+    }
+#endif
+
     const auto start = std::chrono::steady_clock::now();
     ducat::RefreshResult result;
-    std::size_t archive_errors = 0;
     try {
-        ducat::PreparedRefresh prepared = ducat::prepare_refresh(line.path, line.scan);
-#ifdef DUCAT_HAVE_ARCHIVES
-        if (line.archives && prepared.scan) {
-            for (const ducat::ArchiveError& error : ducat::read_archives(*prepared.scan)) {
-                std::cerr << "ducat: " << error.path << ": " << error.message << '\n';
-                ++archive_errors;
-            }
-        }
-#endif
-        result = ducat::apply_refresh(db, std::move(prepared));
+        result = ducat::apply_refresh(db, ducat::prepare_refresh(line.path, options));
     } catch (const std::system_error& e) {
         std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
         return 1;

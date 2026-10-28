@@ -9,6 +9,7 @@ add_library(libducat
     src/record.cpp
     src/scanner.cpp
     src/search.cpp
+    src/spill.cpp
     src/version.cpp
 )
 add_library(ducat::libducat ALIAS libducat)

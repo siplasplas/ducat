@@ -1,6 +1,7 @@
 #include "ducat/database.hpp"
 
 #include "ducat/path.hpp"
+#include "ducat/spill.hpp"
 
 #include <tkrzw_compress.h>
 #include <tkrzw_dbm_tree.h>
@@ -174,10 +175,40 @@ void Database::store(const ScanResult& scan, const Node* parent)
 {
     const std::string root = normalize_path(scan.root.name);
     std::vector<KeptContents> kept = stored_contents(root);
+    std::unordered_map<std::string, const KeptContents*> by_path;
+    for (const KeptContents& contents : kept)
+        by_path.emplace(contents.path, &contents);
     remove_tree(root);
-    store_directory(scan.root, root);
-    if (!kept.empty())
-        restore_contents(scan.root, root, kept);
+    if (!scan.spilled) {
+        store_directory(scan.root, root);
+        if (!kept.empty())
+            restore_contents(scan.root, root, by_path);
+    } else {
+        // The root keeps its entries, with the contents of its archives;
+        // the directories below were written out during the scan.
+        write_directory(scan.root, root, 0);
+        for (const Node& child : scan.root.children) {
+            if (!child.is_dir && child.has_contents && child.children.size() == 1)
+                store_directory(child.children.front(), join_path(root, child.name));
+        }
+        if (!kept.empty())
+            restore_entries(scan.root.children, root, by_path);
+        scan.spilled->for_each(root, [&](const std::string& path,
+                                         const record::EncodedDirectory& records) {
+            set(record::directory_key(path), records.main);
+            for (std::size_t i = 0; i < records.segments.size(); ++i)
+                set(record::segment_key(path, i + 1), records.segments[i]);
+            if (kept.empty())
+                return;
+            // The entries, to find the files whose kept contents return.
+            std::optional<record::DirectoryRecord> decoded = record::decode_directory(records.main);
+            if (!decoded)
+                throw DatabaseError(file_ + ": a scanned record of " + path + " is malformed");
+            for (const std::string& segment : records.segments)
+                record::decode_segment(segment, decoded->dir.children);
+            restore_entries(decoded->dir.children, path, by_path);
+        });
+    }
     if (root != "/")
         replace_entry(root, &scan.root, parent);
 }
@@ -223,31 +254,38 @@ Node Database::load_tree(const std::string& path)
 // Stores the kept contents again for the files of the new scan with the same
 // size and time that brought no new contents.
 void Database::restore_contents(const Node& root, const std::string& root_path,
-                                const std::vector<KeptContents>& kept)
+                                const KeptByPath& by_path)
 {
-    std::unordered_map<std::string, const KeptContents*> by_path;
-    for (const KeptContents& contents : kept)
-        by_path.emplace(contents.path, &contents);
     std::vector<std::pair<const Node*, std::string>> stack{{&root, root_path}};
     while (!stack.empty()) {
         const auto [dir, path] = std::move(stack.back());
         stack.pop_back();
+        restore_entries(dir->children, path, by_path);
         for (const Node& entry : dir->children) {
-            const std::string entry_path = join_path(path, entry.name);
-            if (entry.is_dir) {
-                stack.emplace_back(&entry, entry_path);
-                continue;
-            }
-            const auto found = by_path.find(entry_path);
-            if (found == by_path.end() || entry.has_contents || entry.size != found->second->size
-                || entry.modified != found->second->modified)
-                continue;
-            store_directory(found->second->contents, entry_path);
-            modify_entry(path, entry.name, [](Node& stored) {
-                stored.has_contents = true;
-                return true;
-            });
+            if (entry.is_dir)
+                stack.emplace_back(&entry, join_path(path, entry.name));
         }
+    }
+}
+
+// Stores the kept contents again for the files among `entries` of the stored
+// directory `path` that have the same size and time and no new contents.
+void Database::restore_entries(const std::vector<Node>& entries, const std::string& path,
+                               const KeptByPath& by_path)
+{
+    for (const Node& entry : entries) {
+        if (entry.is_dir || entry.has_contents)
+            continue;
+        const std::string entry_path = join_path(path, entry.name);
+        const auto found = by_path.find(entry_path);
+        if (found == by_path.end() || entry.size != found->second->size
+            || entry.modified != found->second->modified)
+            continue;
+        store_directory(found->second->contents, entry_path);
+        modify_entry(path, entry.name, [](Node& stored) {
+            stored.has_contents = true;
+            return true;
+        });
     }
 }
 

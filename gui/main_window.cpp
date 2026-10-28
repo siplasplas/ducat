@@ -800,7 +800,6 @@ void MainWindow::start_scan(const std::string& path)
     statusBar()->clearMessage();
     progress_ = std::make_unique<ducat::ScanProgress>();
     storing_ = false;
-    reading_archives_ = false;
     refresh_action_->setEnabled(false);
     scan_action_->setEnabled(false);
     one_file_system_action_->setEnabled(false);
@@ -814,33 +813,35 @@ void MainWindow::start_scan(const std::string& path)
     update_progress();
     progress_timer_->start();
 
+    // Directories go to a temporary file next to the database as they are
+    // scanned, so that a large tree need not fit in memory.
+    const std::string database_dir = std::filesystem::path(database_).parent_path().string();
+    std::error_code ignored;
+    std::filesystem::create_directories(database_dir, ignored);
     ducat::ScanOptions options;
     options.one_file_system = one_file_system_action_->isChecked();
     options.progress = progress_.get();
-    // The plugin's methods may run on the scan thread; it lives as long as
-    // the program.
-    ducat::ArchivePlugin* archives = archives_action_->isChecked()
-        ? Plugins::instance().archive()
-        : nullptr;
+    options.spill_directory = database_dir.empty() ? std::string(".") : database_dir;
+    // Archives are read as their directories complete. The plugin's methods
+    // run on the scan threads; it lives as long as the program.
+    auto archive_errors = std::make_shared<std::atomic<std::size_t>>(0);
+    if (ducat::ArchivePlugin* archives =
+            archives_action_->isChecked() ? Plugins::instance().archive() : nullptr) {
+        options.on_directory = [archives, archive_errors](const std::string& dir_path,
+                                                          ducat::Node& dir) {
+            *archive_errors += archives->read_archives_in(dir_path, dir).size();
+        };
+    }
 
-    scan_thread_ = std::thread([this, path, options, archives] {
+    scan_thread_ = std::thread([this, path, options, archive_errors] {
         ScanOutcome outcome;
         outcome.root = ducat::resolve_path(path);
         const auto start = std::chrono::steady_clock::now();
         try {
             ducat::PreparedRefresh prepared = ducat::prepare_refresh(path, options);
-            std::size_t archive_errors = 0;
-            if (archives && prepared.scan) {
-                reading_archives_ = true;
-                archive_errors = archives->read_archives(*prepared.scan).size();
-            }
-            outcome.errors += archive_errors;
-            reading_archives_ = false;
+            outcome.errors += *archive_errors;
             storing_ = true;
             const std::lock_guard lock(database_mutex_);
-            std::error_code ignored;
-            std::filesystem::create_directories(std::filesystem::path(database_).parent_path(),
-                                                ignored);
             ducat::Database db(database_, ducat::Database::Mode::write);
             const ducat::RefreshResult result = ducat::apply_refresh(db, std::move(prepared));
             db.close();
@@ -867,9 +868,8 @@ void MainWindow::update_progress()
     if (!progress_)
         return;
     const std::uint64_t entries = progress_->entries.load(std::memory_order_relaxed);
-    if (storing_ || reading_archives_) {
-        progress_label_->setText(storing_ ? tr("Saving to the database…")
-                                          : tr("Reading archives…"));
+    if (storing_) {
+        progress_label_->setText(tr("Saving to the database…"));
         cancel_button_->setEnabled(false);
         progress_bar_->setRange(0, 0);
         return;

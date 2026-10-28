@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace tkrzw {
@@ -131,10 +132,14 @@ private:
         Node contents;
     };
 
+    using KeptByPath = std::unordered_map<std::string, const KeptContents*>;
+
     std::vector<KeptContents> stored_contents(const std::string& root);
     Node load_tree(const std::string& path);
     void restore_contents(const Node& root, const std::string& root_path,
-                          const std::vector<KeptContents>& kept);
+                          const KeptByPath& by_path);
+    void restore_entries(const std::vector<Node>& entries, const std::string& path,
+                         const KeptByPath& by_path);
 
     void store_directory(const Node& dir, const std::string& path);
     void write_directory(const Node& dir, const std::string& path,

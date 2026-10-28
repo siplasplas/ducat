@@ -30,6 +30,13 @@ counted once. Directory sizes count their own size as well, as GNU `du` does.
 on several threads, by default twice the number of logical cores but at most
 32; `-j N` (`--threads`) sets the number.
 
+Scans write each directory, once it and all below it are read, to a
+temporary file next to the database, so that a large tree need not fit in
+memory (a scan of `/usr` peaks at 80 MiB instead of 200 MiB); the database
+itself is written at the end, in one go, from that file. Archives (`-a`) are
+read as their directories complete. The temporary file has no name and goes
+away with the scan.
+
 A new scan of a stored `PATH` replaces the stored data. When `PATH` lies inside
 a stored tree, only that branch is scanned: its entry in the directory above
 and the totals of all stored directories above are updated. A `PATH` that no

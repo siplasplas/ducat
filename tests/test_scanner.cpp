@@ -207,12 +207,15 @@ void test_threads()
     TempDir temp;
     make_wide_tree(temp.path(), 4, 5); // 781 directories, 2343 files
 
-    ducat::ScanResult single = ducat::scan_tree(temp.path().string(), {false, 1});
+    ducat::ScanOptions options;
+    options.threads = 1;
+    ducat::ScanResult single = ducat::scan_tree(temp.path().string(), options);
     CHECK_EQ(single.root.dirs, 780u);
     CHECK_EQ(single.root.files, 2343u);
     sort_tree(single.root);
     for (const unsigned threads : {2u, 8u, 32u}) {
-        ducat::ScanResult multi = ducat::scan_tree(temp.path().string(), {false, threads});
+        options.threads = threads;
+        ducat::ScanResult multi = ducat::scan_tree(temp.path().string(), options);
         sort_tree(multi.root);
         CHECK_EQ(count_differences(single.root, multi.root), 0u);
         CHECK(multi.errors.empty());
@@ -225,7 +228,10 @@ void test_progress_and_cancel()
     make_wide_tree(temp.path(), 3, 4); // 85 directories, 255 files
 
     ducat::ScanProgress progress;
-    const ducat::ScanResult result = ducat::scan_tree(temp.path().string(), {false, 8, &progress});
+    ducat::ScanOptions options;
+    options.threads = 8;
+    options.progress = &progress;
+    const ducat::ScanResult result = ducat::scan_tree(temp.path().string(), options);
     CHECK_EQ(progress.entries.load(), result.root.files + result.root.dirs);
     CHECK_EQ(progress.dirs.load(), result.root.dirs + 1);
 
@@ -233,7 +239,8 @@ void test_progress_and_cancel()
     cancelled.cancel = true;
     bool thrown = false;
     try {
-        ducat::scan_tree(temp.path().string(), {false, 8, &cancelled});
+        options.progress = &cancelled;
+        ducat::scan_tree(temp.path().string(), options);
     } catch (const ducat::ScanCancelled&) {
         thrown = true;
     }

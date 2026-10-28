@@ -122,6 +122,27 @@ std::optional<Node> list_archive(const std::string& path, std::string& error)
     return finish({}, root);
 }
 
+std::vector<ArchiveError> read_archives_in(const std::string& path, Node& dir)
+{
+    std::vector<ArchiveError> errors;
+    for (Node& child : dir.children) {
+        if (child.is_dir || !is_archive_name(child.name))
+            continue;
+        const std::string child_path = join_path(path, child.name);
+        std::string error;
+        std::optional<Node> contents = list_archive(child_path, error);
+        if (!contents) {
+            errors.push_back({child_path, error});
+            continue;
+        }
+        contents->modified = child.modified;
+        child.has_contents = true;
+        child.children.clear();
+        child.children.push_back(std::move(*contents));
+    }
+    return errors;
+}
+
 std::vector<ArchiveError> read_archives(ScanResult& scan)
 {
     std::vector<ArchiveError> errors;
@@ -129,24 +150,11 @@ std::vector<ArchiveError> read_archives(ScanResult& scan)
     while (!stack.empty()) {
         auto [dir, path] = std::move(stack.back());
         stack.pop_back();
+        for (ArchiveError& error : read_archives_in(path, *dir))
+            errors.push_back(std::move(error));
         for (Node& child : dir->children) {
-            const std::string child_path = join_path(path, child.name);
-            if (child.is_dir) {
-                stack.emplace_back(&child, child_path);
-                continue;
-            }
-            if (!is_archive_name(child.name))
-                continue;
-            std::string error;
-            std::optional<Node> contents = list_archive(child_path, error);
-            if (!contents) {
-                errors.push_back({child_path, error});
-                continue;
-            }
-            contents->modified = child.modified;
-            child.has_contents = true;
-            child.children.clear();
-            child.children.push_back(std::move(*contents));
+            if (child.is_dir)
+                stack.emplace_back(&child, join_path(path, child.name));
         }
     }
     return errors;

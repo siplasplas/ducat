@@ -197,7 +197,6 @@ private:
     std::mutex database_mutex_;
     std::unique_ptr<ducat::ScanProgress> progress_;
     std::atomic<bool> storing_ = false;
-    std::atomic<bool> reading_archives_ = false;
 
     // An archive read from disk, not stored, while it or a folder in it is
     // shown.
