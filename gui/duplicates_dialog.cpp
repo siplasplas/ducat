@@ -279,11 +279,12 @@ void DuplicatesDialog::find_files()
         QStandardItem* name = item(text(group.name));
         name->setFont(bold);
         QList<QStandardItem*> row{name, number_item(size_text(group.size), group.size),
-                                  number_item(count_text(group.paths.size()), group.paths.size()),
+                                  number_item(count_text(group.copies.size()),
+                                              group.copies.size()),
                                   number_item(size_text(group.wasted()), group.wasted())};
-        for (const std::string& path : group.paths) {
-            QStandardItem* copy = item(text(path));
-            copy->setData(text(path), path_role);
+        for (const ducat::Location& location : group.copies) {
+            QStandardItem* copy = item(text(location.path));
+            copy->setData(text(location.path), path_role);
             name->appendRow({copy, item({}), item({}), item({})});
         }
         files_model_->appendRow(row);
@@ -323,10 +324,10 @@ void DuplicatesDialog::find_folders()
     const std::size_t listed = std::min(pairs.size(), max_listed);
     for (std::size_t i = 0; i < listed; ++i) {
         const ducat::DuplicateDirPair& pair = pairs[i];
-        QStandardItem* first = item(text(pair.first));
-        first->setData(text(pair.first), path_role);
-        QStandardItem* second = item(text(pair.second));
-        second->setData(text(pair.second), path_role);
+        QStandardItem* first = item(text(pair.first.path));
+        first->setData(text(pair.first.path), path_role);
+        QStandardItem* second = item(text(pair.second.path));
+        second->setData(text(pair.second.path), path_role);
         QStandardItem* similar = number_item(QStringLiteral("%1 %").arg(pair.similarity),
                                              pair.similarity);
         folders_model_->appendRow(

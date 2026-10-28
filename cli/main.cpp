@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -29,9 +30,9 @@ void print_usage(std::ostream& out)
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
            "       ducat compact [-d FILE]\n"
-           "       ducat find [-d FILE] [PATH] [CRITERIA] [--sort KEY] [--limit N]\n"
-           "       ducat dups [-d FILE] [PATH] [--time] [--min-size SIZE] [--limit N]\n"
-           "       ducat dups --dirs [-d FILE] [PATH] [--threshold PERCENT] [--names]\n"
+           "       ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]\n"
+           "       ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]\n"
+           "       ducat dups --dirs [-d FILE]... [PATH]... [--threshold PERCENT] [--names]\n"
            "                  [--min-files N] [--limit N]\n"
            "\n"
            "Fast disk usage catalog.\n"
@@ -46,15 +47,20 @@ void print_usage(std::ostream& out)
            "  trees          List the stored trees with their disk usage\n"
            "  compact        Rebuild the database file to give back unused space;\n"
            "                 scan does this by itself when the file has grown much\n"
-           "  find [PATH]    Search the stored entries below PATH, or in all stored\n"
+           "  find [PATH]... Search the stored entries below the PATHs, or in all stored\n"
            "                 trees, without scanning; see Find criteria below\n"
-           "  dups [PATH]    List probable duplicate files: same name and size, with\n"
+           "  dups [PATH]... List probable duplicate files: same name and size, with\n"
            "                 --time also the same time; files under --min-size (1 B)\n"
            "                 are left out. With --dirs, list directories sharing at\n"
            "                 least --threshold percent (80) of the files below them,\n"
            "                 counted against the larger one, by name and size or with\n"
            "                 --names by name only; directories with fewer than\n"
            "                 --min-files files (5) are left out\n"
+           "\n"
+           "find and dups take several -d and PATHs: every PATH is looked for in every\n"
+           "database, e.g. one of a home directory and one of removable drives. A PATH\n"
+           "holding stored trees, such as /run/media/USER, stands for them. With more\n"
+           "than one database, paths are shown as DATABASE-FILE:PATH.\n"
            "\n"
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
@@ -258,10 +264,55 @@ std::optional<std::uint64_t> parse_count(std::string_view text)
     return value;
 }
 
+// The databases (-d, repeatable) and PATHs of find and dups: each PATH is
+// looked for in each database, and a database without any is left out.
+struct Sources {
+    std::vector<std::unique_ptr<ducat::Database>> databases;
+    std::vector<ducat::Scope> scopes;
+    // Before each path in the output, with more than one database: "file:".
+    std::vector<std::string> labels;
+};
+
+// Returns false after printing an error.
+bool open_sources(std::vector<std::string> files, const std::vector<std::string>& paths,
+                  Sources& sources)
+{
+    if (files.empty())
+        files.push_back(ducat::default_database_path());
+    std::sort(files.begin(), files.end());
+    files.erase(std::unique(files.begin(), files.end()), files.end());
+
+    std::vector<bool> found(paths.size(), false);
+    for (const std::string& file : files) {
+        auto db = std::make_unique<ducat::Database>(file, ducat::Database::Mode::read);
+        ducat::Scope scope{db.get(), {}};
+        for (std::size_t i = 0; i < paths.size(); ++i) {
+            if (ducat::covers_stored_trees(*db, paths[i])) {
+                scope.paths.push_back(paths[i]);
+                found[i] = true;
+            }
+        }
+        if (!paths.empty() && scope.paths.empty())
+            continue;
+        sources.scopes.push_back(scope);
+        sources.labels.push_back(
+            files.size() > 1 ? std::filesystem::path(file).filename().string() + ":" : "");
+        sources.databases.push_back(std::move(db));
+    }
+    for (std::size_t i = 0; i < paths.size(); ++i) {
+        if (!found[i]) {
+            std::cerr << "ducat: " << paths[i] << ": not in the database"
+                      << (files.size() > 1 ? "s" : "") << '\n';
+            return false;
+        }
+    }
+    return true;
+}
+
 int run_find(int argc, char* argv[], int first)
 {
-    std::string database = ducat::default_database_path();
-    std::string path;
+    std::vector<std::string> databases;
+    std::vector<std::string> paths;
     ducat::SearchQuery query;
     std::string sort = "size";
     std::size_t limit = 0;
@@ -289,7 +340,7 @@ int run_find(int argc, char* argv[], int first)
             if (!text)
                 return 2;
             if (arg == "-d" || arg == "--database") {
-                database = ducat::database_path_from_argument(*text);
+                databases.push_back(ducat::database_path_from_argument(*text));
             } else if (arg == "-t" || arg == "--type") {
                 if (*text == "f")
                     query.type = ducat::SearchQuery::Type::file;
@@ -340,25 +391,24 @@ int run_find(int argc, char* argv[], int first)
         } else if (arg.starts_with('-') && arg != "-") {
             std::cerr << "ducat: unknown option '" << arg << "'\n";
             return 2;
-        } else if (path.empty()) {
-            path = ducat::resolve_path(arg);
         } else {
-            std::cerr << "ducat: only one PATH is allowed\n";
-            return 2;
+            paths.push_back(ducat::resolve_path(arg));
         }
     }
 
+    Sources sources;
+    if (!open_sources(databases, paths, sources))
+        return 1;
     struct Match {
-        std::string path;
+        std::string path; // with the label of its database
         ducat::Node entry;
     };
     std::vector<Match> found;
-    ducat::Database db(database, ducat::Database::Mode::read);
-    ducat::search(db, query, path, [&](const std::string& match_path, const ducat::Node& entry) {
-        found.push_back({match_path, entry});
-        return true;
-    });
-    db.close();
+    ducat::search(sources.scopes, query,
+                  [&](std::size_t scope, const std::string& match_path, const ducat::Node& entry) {
+                      found.push_back({sources.labels[scope] + match_path, entry});
+                      return true;
+                  });
 
     const auto by = [&](const Match& a, const Match& b) {
         if (sort == "path")
@@ -396,8 +446,8 @@ int run_find(int argc, char* argv[], int first)
 
 int run_dups(int argc, char* argv[], int first)
 {
-    std::string database = ducat::default_database_path();
-    std::string path;
+    std::vector<std::string> databases;
+    std::vector<std::string> paths;
     bool dirs = false;
     ducat::DuplicateFileOptions file_options;
     ducat::DuplicateDirOptions dir_options;
@@ -423,7 +473,7 @@ int run_dups(int argc, char* argv[], int first)
                 return 2;
             };
             if (arg == "-d" || arg == "--database") {
-                database = ducat::database_path_from_argument(text);
+                databases.push_back(ducat::database_path_from_argument(text));
             } else if (arg == "--min-size") {
                 const std::optional<std::uint64_t> size = ducat::parse_size(text);
                 if (!size)
@@ -446,18 +496,20 @@ int run_dups(int argc, char* argv[], int first)
         } else if (arg.starts_with('-') && arg != "-") {
             std::cerr << "ducat: unknown option '" << arg << "'\n";
             return 2;
-        } else if (path.empty()) {
-            path = ducat::resolve_path(arg);
         } else {
-            std::cerr << "ducat: only one PATH is allowed\n";
-            return 2;
+            paths.push_back(ducat::resolve_path(arg));
         }
     }
 
-    ducat::Database db(database, ducat::Database::Mode::read);
+    Sources sources;
+    if (!open_sources(databases, paths, sources))
+        return 1;
+    const auto shown_path = [&](const ducat::Location& location) {
+        return sources.labels[location.scope] + location.path;
+    };
     if (dirs) {
         const std::vector<ducat::DuplicateDirPair> pairs =
-            ducat::find_duplicate_dirs(db, path, dir_options);
+            ducat::find_duplicate_dirs(sources.scopes, dir_options);
         const std::size_t shown = limit == 0 ? pairs.size() : std::min(limit, pairs.size());
         for (std::size_t i = 0; i < shown; ++i) {
             const ducat::DuplicateDirPair& pair = pairs[i];
@@ -465,9 +517,11 @@ int run_dups(int argc, char* argv[], int first)
                         static_cast<unsigned long long>(pair.shared),
                         static_cast<unsigned long long>(pair.first_files));
             std::printf("  %12s %9llu  %s/\n", ducat::format_size(pair.first_disk).c_str(),
-                        static_cast<unsigned long long>(pair.first_files), pair.first.c_str());
+                        static_cast<unsigned long long>(pair.first_files),
+                        shown_path(pair.first).c_str());
             std::printf("  %12s %9llu  %s/\n", ducat::format_size(pair.second_disk).c_str(),
-                        static_cast<unsigned long long>(pair.second_files), pair.second.c_str());
+                        static_cast<unsigned long long>(pair.second_files),
+                        shown_path(pair.second).c_str());
         }
         std::printf("%zu pairs of similar directories%s\n", pairs.size(),
                     shown < pairs.size() ? (", " + std::to_string(shown) + " shown").c_str() : "");
@@ -475,7 +529,7 @@ int run_dups(int argc, char* argv[], int first)
     }
 
     const std::vector<ducat::DuplicateFileGroup> groups =
-        ducat::find_duplicate_files(db, path, file_options);
+        ducat::find_duplicate_files(sources.scopes, file_options);
     const std::size_t shown = limit == 0 ? groups.size() : std::min(limit, groups.size());
     std::uint64_t wasted = 0;
     for (const ducat::DuplicateFileGroup& group : groups)
@@ -483,10 +537,10 @@ int run_dups(int argc, char* argv[], int first)
     for (std::size_t i = 0; i < shown; ++i) {
         const ducat::DuplicateFileGroup& group = groups[i];
         std::printf("%s x %zu, %s wasted: %s\n", ducat::format_size(group.size).c_str(),
-                    group.paths.size(), ducat::format_size(group.wasted()).c_str(),
+                    group.copies.size(), ducat::format_size(group.wasted()).c_str(),
                     group.name.c_str());
-        for (const std::string& file : group.paths)
-            std::printf("  %s\n", file.c_str());
+        for (const ducat::Location& copy : group.copies)
+            std::printf("  %s\n", shown_path(copy).c_str());
     }
     std::printf("%zu groups of probable duplicates, %s in the copies beyond the first%s\n",
                 groups.size(), ducat::format_size(wasted).c_str(),

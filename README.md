@@ -15,9 +15,9 @@ ducat scan [-x] [-j N] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
-ducat find [-d FILE] [PATH] [CRITERIA] [--sort KEY] [--limit N]
-ducat dups [-d FILE] [PATH] [--time] [--min-size SIZE] [--limit N]
-ducat dups --dirs [-d FILE] [PATH] [--threshold PERCENT] [--names] [--min-files N] [--limit N]
+ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]
+ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]
+ducat dups --dirs [-d FILE]... [PATH]... [--threshold PERCENT] [--names] [--min-files N] [--limit N]
 ```
 
 `scan` scans the tree at `PATH`, stores it in the database and prints its disk
@@ -100,6 +100,18 @@ sizes only, without reading the files:
 
 On `/usr` (870,000 entries) either takes about 0.4 s and some 100 MB of
 memory.
+
+`find` and `dups` work on several databases and paths at once: `-d` and
+`PATH` may be repeated, and each `PATH` is looked for in each database. A
+`PATH` that is not stored itself but holds stored trees, such as the mount
+directory of several scanned drives, stands for those trees. With more than
+one database, paths are shown as `DATABASE-FILE:PATH`. For example, with the
+home directory in one database and removable drives in another:
+
+```sh
+ducat dups -d ~/home.ducat -d ~/drives.ducat          # also across the two
+ducat dups --dirs -d ~/drives.ducat /run/media/$USER  # only among the drives
+```
 
 ### Databases
 

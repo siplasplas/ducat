@@ -109,6 +109,22 @@ private:
     std::unique_ptr<tkrzw::TreeDBM> dbm_;
 };
 
+// Stored trees to work on, e.g. to search: `paths` of `db`, or all its
+// stored trees when `paths` is empty.
+struct Scope {
+    Database* db = nullptr;
+    std::vector<std::string> paths;
+};
+
+// The stored directories a scope covers, normalized, none inside another. A
+// path that is not stored itself but holds stored trees, such as the mount
+// directory of several scanned drives, stands for those trees. Throws
+// DatabaseError for a path that is neither.
+std::vector<std::string> scope_roots(const Scope& scope);
+
+// Whether `path` is stored in `db`, or holds stored trees.
+bool covers_stored_trees(Database& db, std::string_view path);
+
 // The file name of a database given only by its directory.
 inline constexpr std::string_view default_database_name = "drives.ducat";
 

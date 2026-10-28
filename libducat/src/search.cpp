@@ -119,25 +119,31 @@ bool matches(const SearchQuery& query, const Node& entry)
     return entry.modified >= query.modified_after && entry.modified < query.modified_before;
 }
 
+bool search(const std::vector<Scope>& scopes, const SearchQuery& query,
+            const ScopedSearchCallback& on_match)
+{
+    for (std::size_t i = 0; i < scopes.size(); ++i) {
+        const SearchCallback callback = [&](const std::string& path, const Node& entry) {
+            return on_match(i, path, entry);
+        };
+        Searcher searcher(*scopes[i].db, query, callback);
+        for (const std::string& root : scope_roots(scopes[i])) {
+            if (!searcher.visit(root))
+                return false;
+        }
+    }
+    return true;
+}
+
 bool search(Database& db, const SearchQuery& query, std::string_view root,
             const SearchCallback& on_match)
 {
-    std::vector<std::string> roots;
-    if (root.empty()) {
-        roots = db.roots();
-    } else {
-        std::string normalized = normalize_path(root);
-        if (!db.read_directory(normalized))
-            throw DatabaseError(normalized + " is not in the database");
-        roots.push_back(std::move(normalized));
-    }
-
-    Searcher searcher(db, query, on_match);
-    for (const std::string& path : roots) {
-        if (!searcher.visit(path))
-            return false;
-    }
-    return true;
+    Scope scope{&db, {}};
+    if (!root.empty())
+        scope.paths.emplace_back(root);
+    return search({scope}, query, [&](std::size_t, const std::string& path, const Node& entry) {
+        return on_match(path, entry);
+    });
 }
 
 } // namespace ducat

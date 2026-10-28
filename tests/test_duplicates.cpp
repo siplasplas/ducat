@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <system_error>
@@ -83,8 +84,8 @@ std::set<Group> file_groups(ducat::Database& db, const fs::path& root,
     const std::size_t prefix = root.string().size() + 1;
     for (const auto& group : ducat::find_duplicate_files(db, root.string(), options)) {
         Group relative;
-        for (const std::string& path : group.paths)
-            relative.push_back(path.substr(prefix));
+        for (const ducat::Location& copy : group.copies)
+            relative.push_back(copy.path.substr(prefix));
         result.insert(relative);
     }
     return result;
@@ -137,8 +138,8 @@ std::set<Pair> dir_pairs(ducat::Database& db, const fs::path& root,
     std::set<Pair> result;
     const std::size_t prefix = root.string().size() + 1;
     for (const auto& pair : ducat::find_duplicate_dirs(db, root.string(), options)) {
-        std::string a = pair.first.substr(prefix);
-        std::string b = pair.second.substr(prefix);
+        std::string a = pair.first.path.substr(prefix);
+        std::string b = pair.second.path.substr(prefix);
         if (b < a)
             std::swap(a, b);
         result.insert({a, b, pair.similarity});
@@ -267,11 +268,77 @@ void test_dirs()
     }
 }
 
+// Several databases, e.g. of a home directory and of removable drives.
+void test_scopes()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    const auto open = [&](const char* name) {
+        return std::make_unique<ducat::Database>((temp.path() / name).string(),
+                                                 ducat::Database::Mode::write);
+    };
+    const auto home = open("home.ducat");
+    const auto drives = open("drives.ducat");
+    const auto again = open("again.ducat");
+    home->store(ducat::scan_tree((root / "photos").string()));
+    drives->store(ducat::scan_tree((root / "partial").string()));
+    drives->store(ducat::scan_tree((root / "names").string()));
+    again->store(ducat::scan_tree((root / "photos").string()));
+    const std::string photos = (root / "photos").string();
+    const std::string partial = (root / "partial").string();
+
+    // Copies across the two databases, each with the index of its scope.
+    const std::vector<ducat::Scope> both{{home.get(), {}}, {drives.get(), {}}};
+    const auto groups = ducat::find_duplicate_files(both);
+    const auto b = std::find_if(groups.begin(), groups.end(),
+                                [](const auto& g) { return g.name == "b.jpg"; });
+    CHECK(b != groups.end());
+    if (b != groups.end()) {
+        CHECK(b->copies == (std::vector<ducat::Location>{{0, photos + "/b.jpg"},
+                                                         {1, partial + "/b.jpg"}}));
+    }
+
+    const auto pairs = ducat::find_duplicate_dirs(both);
+    CHECK_EQ(pairs.size(), 1u);
+    if (!pairs.empty()) {
+        const auto [low, high] = std::minmax(pairs[0].first, pairs[0].second);
+        CHECK(low == (ducat::Location{0, photos}));
+        CHECK(high == (ducat::Location{1, partial}));
+    }
+
+    // Only the drives: no copy of photos, so b.jpg is single.
+    const auto only_drives = ducat::find_duplicate_files({{drives.get(), {}}});
+    CHECK(std::none_of(only_drives.begin(), only_drives.end(),
+                       [](const auto& g) { return g.name == "b.jpg"; }));
+
+    // The same path in two databases pairs, as an older and a newer scan.
+    const auto same = ducat::find_duplicate_dirs({{home.get(), {}}, {again.get(), {}}});
+    CHECK(same.size() == 1 && same[0].similarity == 100 && same[0].first.path == photos
+          && same[0].second.path == photos && same[0].first.scope != same[0].second.scope);
+
+    // A path holding stored trees, like a mount directory, stands for them; a
+    // path inside another counts once; one neither stored nor holding stored
+    // trees is an error.
+    CHECK(ducat::scope_roots({drives.get(), {root.string()}})
+          == (std::vector<std::string>{(root / "names").string(), partial}));
+    CHECK(ducat::scope_roots({home.get(), {photos + "/sub", photos, photos + "/"}})
+          == (std::vector<std::string>{photos}));
+    bool thrown = false;
+    try {
+        ducat::find_duplicate_files({{home.get(), {(root / "partial").string()}}});
+    } catch (const ducat::DatabaseError&) {
+        thrown = true;
+    }
+    CHECK(thrown);
+}
+
 } // namespace
 
 int main()
 {
     test_files();
     test_dirs();
+    test_scopes();
     return check::result();
 }

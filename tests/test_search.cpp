@@ -243,6 +243,37 @@ void test_search()
     CHECK(thrown);
 }
 
+// Two databases searched at once, e.g. of a home directory and of drives.
+void test_scopes()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    ducat::Database home((temp.path() / "home.ducat").string(), ducat::Database::Mode::write);
+    ducat::Database drives((temp.path() / "drives.ducat").string(), ducat::Database::Mode::write);
+    home.store(ducat::scan_tree((root / "photos").string()));
+    drives.store(ducat::scan_tree((root / "many").string()));
+    drives.store(ducat::scan_tree((root / "empty").string()));
+
+    ducat::SearchQuery query;
+    query.type = ducat::SearchQuery::Type::file;
+    std::set<std::pair<std::size_t, std::string>> found;
+    const auto collect = [&](std::size_t scope, const std::string& path, const ducat::Node&) {
+        found.insert({scope, path.substr(root.string().size() + 1)});
+        return true;
+    };
+
+    ducat::search({{&home, {}}, {&drives, {}}}, query, collect);
+    CHECK(found.count({0, "photos/raw/r1.cr2"}));
+    CHECK(found.count({1, "many/f0"}));
+    CHECK_EQ(found.size(), 3u + 60u);
+
+    // The tree directory is stored in neither, but holds the trees of both.
+    found.clear();
+    ducat::search({{&drives, {root.string()}}}, query, collect);
+    CHECK_EQ(found.size(), 60u);
+}
+
 } // namespace
 
 int main()
@@ -250,5 +281,6 @@ int main()
     test_parse_size();
     test_parse_time();
     test_search();
+    test_scopes();
     return check::result();
 }

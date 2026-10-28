@@ -460,6 +460,61 @@ std::uint64_t Database::file_size()
     return size < 0 ? 0 : static_cast<std::uint64_t>(size);
 }
 
+namespace {
+
+bool inside(const std::string& path, const std::string& dir)
+{
+    return dir == "/" ? path != "/"
+                      : path.size() > dir.size() && path.starts_with(dir) && path[dir.size()] == '/';
+}
+
+// The stored directories `path` stands for: itself, or the stored trees in it.
+std::vector<std::string> trees_of(Database& db, const std::string& path,
+                                  const std::vector<std::string>& roots)
+{
+    if (db.read_directory(path))
+        return {path};
+    std::vector<std::string> result;
+    for (const std::string& root : roots) {
+        if (inside(root, path))
+            result.push_back(root);
+    }
+    return result;
+}
+
+} // namespace
+
+std::vector<std::string> scope_roots(const Scope& scope)
+{
+    const std::vector<std::string> all = scope.db->roots();
+    if (scope.paths.empty())
+        return all;
+
+    std::vector<std::string> result;
+    for (const std::string& path : scope.paths) {
+        const std::string normalized = normalize_path(path);
+        const std::vector<std::string> trees = trees_of(*scope.db, normalized, all);
+        if (trees.empty())
+            throw DatabaseError(normalized + " is not in the database");
+        result.insert(result.end(), trees.begin(), trees.end());
+    }
+    // Without duplicates and directories inside others, which would count twice.
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    std::vector<std::string> outermost;
+    for (const std::string& dir : result) {
+        if (std::none_of(result.begin(), result.end(),
+                         [&](const std::string& other) { return inside(dir, other); }))
+            outermost.push_back(dir);
+    }
+    return outermost;
+}
+
+bool covers_stored_trees(Database& db, std::string_view path)
+{
+    return !trees_of(db, normalize_path(path), db.roots()).empty();
+}
+
 std::string default_database_path()
 {
     const char* data = std::getenv("XDG_DATA_HOME");

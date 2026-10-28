@@ -57,8 +57,16 @@ using SearchCallback = std::function<bool(const std::string& path, const Node& e
 // trees when `root` is empty, depth first. Subtrees whose totals rule out a
 // match, e.g. smaller than min_size, are not read. Returns false when the
 // callback stopped the search. Throws DatabaseError when `root` is given
-// but not stored.
+// but not stored and holds no stored trees (see scope_roots).
 bool search(Database& db, const SearchQuery& query, std::string_view root,
             const SearchCallback& on_match);
+
+// Called with the index of the scope, e.g. of the database, too.
+using ScopedSearchCallback =
+    std::function<bool(std::size_t scope, const std::string& path, const Node& entry)>;
+
+// The same over several scopes, possibly in several databases, in order.
+bool search(const std::vector<Scope>& scopes, const SearchQuery& query,
+            const ScopedSearchCallback& on_match);
 
 } // namespace ducat

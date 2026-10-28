@@ -12,44 +12,45 @@ namespace ducat {
 
 namespace {
 
-// Calls visit(index, parent, path, dir) for each stored directory below
-// `root`, or below all stored trees when it is empty, depth first: a
-// directory comes before everything inside it and gets the next index.
-// Only one directory is in memory at a time.
+// Calls visit(index, parent, scope, path, dir) for each stored directory of
+// the scopes, depth first: a directory comes before everything inside it
+// and gets the next index. Only one directory is in memory at a time.
 template <typename Visit>
-void walk_trees(Database& db, std::string_view root, Visit visit)
+void walk_trees(const std::vector<Scope>& scopes, Visit visit)
 {
-    std::vector<std::string> roots;
-    if (root.empty()) {
-        roots = db.roots();
-    } else {
-        std::string normalized = normalize_path(root);
-        if (!db.read_directory(normalized))
-            throw DatabaseError(normalized + " is not in the database");
-        roots.push_back(std::move(normalized));
-    }
-
-    std::vector<std::pair<std::string, int>> stack; // path, parent index
-    for (auto it = roots.rbegin(); it != roots.rend(); ++it)
-        stack.emplace_back(*it, -1);
     int next = 0;
+    std::vector<std::pair<std::string, int>> stack; // path, parent index
     std::vector<std::string> subdirs;
-    while (!stack.empty()) {
-        auto [path, parent] = std::move(stack.back());
-        stack.pop_back();
-        const std::optional<Node> dir = db.load_directory(path);
-        if (!dir)
-            continue;
-        const int index = next++;
-        visit(index, parent, path, *dir);
-        subdirs.clear();
-        for (const Node& entry : dir->children) {
-            if (entry.is_dir)
-                subdirs.push_back(join_path(path, entry.name));
+    for (std::size_t scope = 0; scope < scopes.size(); ++scope) {
+        Database& db = *scopes[scope].db;
+        const std::vector<std::string> roots = scope_roots(scopes[scope]);
+        for (auto it = roots.rbegin(); it != roots.rend(); ++it)
+            stack.emplace_back(*it, -1);
+        while (!stack.empty()) {
+            auto [path, parent] = std::move(stack.back());
+            stack.pop_back();
+            const std::optional<Node> dir = db.load_directory(path);
+            if (!dir)
+                continue;
+            const int index = next++;
+            visit(index, parent, scope, path, *dir);
+            subdirs.clear();
+            for (const Node& entry : dir->children) {
+                if (entry.is_dir)
+                    subdirs.push_back(join_path(path, entry.name));
+            }
+            for (auto sub = subdirs.rbegin(); sub != subdirs.rend(); ++sub)
+                stack.emplace_back(std::move(*sub), index);
         }
-        for (auto sub = subdirs.rbegin(); sub != subdirs.rend(); ++sub)
-            stack.emplace_back(std::move(*sub), index);
     }
+}
+
+std::vector<Scope> single_scope(Database& db, std::string_view root)
+{
+    Scope scope{&db, {}};
+    if (!root.empty())
+        scope.paths.emplace_back(root);
+    return {scope};
 }
 
 // A hard link whose data is counted at another link.
@@ -111,13 +112,19 @@ std::uint64_t overlap(const std::vector<std::uint32_t>& a, const std::vector<std
 std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_view root,
                                                      const DuplicateFileOptions& options)
 {
+    return find_duplicate_files(single_scope(db, root), options);
+}
+
+std::vector<DuplicateFileGroup> find_duplicate_files(const std::vector<Scope>& scopes,
+                                                     const DuplicateFileOptions& options)
+{
     const auto counted = [&](const Node& entry) {
         return !entry.is_dir && !counted_elsewhere(entry) && entry.size >= options.min_size;
     };
 
     // First pass: the hashes of all keys, and those seen more than once.
     std::vector<std::uint64_t> hashes;
-    walk_trees(db, root, [&](int, int, const std::string&, const Node& dir) {
+    walk_trees(scopes, [&](int, int, std::size_t, const std::string&, const Node& dir) {
         for (const Node& entry : dir.children) {
             if (counted(entry))
                 hashes.push_back(key_hash(file_key(entry, true, options.same_time)));
@@ -135,23 +142,23 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
     // so that a hash collision groups nothing wrongly.
     struct Candidate {
         std::string key;
-        std::string path;
+        Location location;
         std::uint64_t size;
         std::uint64_t disk;
     };
     std::vector<Candidate> candidates;
-    walk_trees(db, root, [&](int, int, const std::string& path, const Node& dir) {
+    walk_trees(scopes, [&](int, int, std::size_t scope, const std::string& path, const Node& dir) {
         for (const Node& entry : dir.children) {
             if (!counted(entry))
                 continue;
             std::string key = file_key(entry, true, options.same_time);
             if (std::binary_search(repeated.begin(), repeated.end(), key_hash(key)))
-                candidates.push_back(
-                    {std::move(key), join_path(path, entry.name), entry.size, entry.disk});
+                candidates.push_back({std::move(key), {scope, join_path(path, entry.name)},
+                                      entry.size, entry.disk});
         }
     });
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
-        return a.key != b.key ? a.key < b.key : a.path < b.path;
+        return a.key != b.key ? a.key < b.key : a.location < b.location;
     });
 
     std::vector<DuplicateFileGroup> groups;
@@ -165,7 +172,7 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
             group.size = candidates[i].size;
             for (std::size_t j = i; j < end; ++j) {
                 group.disk = std::max(group.disk, candidates[j].disk);
-                group.paths.push_back(std::move(candidates[j].path));
+                group.copies.push_back(std::move(candidates[j].location));
             }
         }
         i = end;
@@ -173,12 +180,18 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
     std::sort(groups.begin(), groups.end(), [](const auto& a, const auto& b) {
         if (a.wasted() != b.wasted())
             return a.wasted() > b.wasted();
-        return a.paths.front() < b.paths.front();
+        return a.copies.front() < b.copies.front();
     });
     return groups;
 }
 
 std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view root,
+                                                  const DuplicateDirOptions& options)
+{
+    return find_duplicate_dirs(single_scope(db, root), options);
+}
+
+std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scopes,
                                                   const DuplicateDirOptions& options)
 {
     const std::uint64_t percent = std::clamp(options.threshold, 1u, 100u);
@@ -187,6 +200,7 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
     // those of dir i are hashes[first_file[i]] .. hashes[first_file[i + 1]].
     struct Dir {
         std::string path;
+        std::size_t scope;
         int parent;
         std::uint64_t total_disk;
         std::vector<int> children;
@@ -194,8 +208,9 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
     std::vector<Dir> dirs;
     std::vector<std::uint64_t> hashes;
     std::vector<std::size_t> first_file;
-    walk_trees(db, root, [&](int index, int parent, const std::string& path, const Node& dir) {
-        dirs.push_back({path, parent, dir.total_disk, {}});
+    walk_trees(scopes, [&](int index, int parent, std::size_t scope, const std::string& path,
+                           const Node& dir) {
+        dirs.push_back({path, scope, parent, dir.total_disk, {}});
         if (parent >= 0)
             dirs[static_cast<std::size_t>(parent)].children.push_back(index);
         first_file.push_back(hashes.size());
@@ -291,9 +306,12 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
                 // |B| <= |A|; the larger one sets the bar.
                 if (set_b.size() * 100 < percent * size_a)
                     continue;
-                const std::string& path_a = dirs[static_cast<std::size_t>(a)].path;
-                const std::string& path_b = dirs[static_cast<std::size_t>(b)].path;
-                if (is_inside(path_a, path_b) || is_inside(path_b, path_a))
+                // One inside the other, in the same scope; the same path in
+                // two scopes may pair.
+                const Dir& dir_a = dirs[static_cast<std::size_t>(a)];
+                const Dir& dir_b = dirs[static_cast<std::size_t>(b)];
+                if (dir_a.scope == dir_b.scope
+                    && (is_inside(dir_a.path, dir_b.path) || is_inside(dir_b.path, dir_a.path)))
                     continue;
                 const std::uint64_t shared = overlap(set_a, set_b);
                 if (shared * 100 >= percent * size_a)
@@ -327,7 +345,7 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(Database& db, std::string_view
         const Dir& first = dirs[static_cast<std::size_t>(f.larger)];
         const Dir& second = dirs[static_cast<std::size_t>(f.smaller)];
         const std::uint64_t first_files = sets[static_cast<std::size_t>(f.larger)].size();
-        result.push_back({first.path, second.path, first_files,
+        result.push_back({{first.scope, first.path}, {second.scope, second.path}, first_files,
                           sets[static_cast<std::size_t>(f.smaller)].size(), f.shared,
                           first.total_disk, second.total_disk,
                           static_cast<unsigned>(f.shared * 100 / first_files)});
