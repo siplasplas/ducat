@@ -181,12 +181,12 @@ QWidget* DuplicatesDialog::make_folders_tab()
     threshold_->setValue(80);
     threshold_->setSuffix(QStringLiteral(" %"));
     threshold_->setToolTip(tr("Files shared, of the files of the folder with more of them, "
-                              "counting all files below the folders"));
+                              "counting only the files directly in the folders"));
     names_only_ = new QCheckBox(tr("Names only, sizes may differ"), tab);
     min_files_ = new QSpinBox(tab);
     min_files_->setRange(1, 1000000);
     min_files_->setValue(5);
-    min_files_->setToolTip(tr("Folders with fewer files below them are left out"));
+    min_files_->setToolTip(tr("Folders with fewer files directly in them are left out"));
     auto* find = new QPushButton(tr("Find Folders"), tab);
     connect(find, &QPushButton::clicked, this, &DuplicatesDialog::find_folders);
 

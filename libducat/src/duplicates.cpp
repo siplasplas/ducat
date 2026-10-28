@@ -203,16 +203,13 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scop
         std::size_t scope;
         int parent;
         std::uint64_t total_disk;
-        std::vector<int> children;
     };
     std::vector<Dir> dirs;
     std::vector<std::uint64_t> hashes;
     std::vector<std::size_t> first_file;
-    walk_trees(scopes, [&](int index, int parent, std::size_t scope, const std::string& path,
+    walk_trees(scopes, [&](int, int parent, std::size_t scope, const std::string& path,
                            const Node& dir) {
-        dirs.push_back({path, scope, parent, dir.total_disk, {}});
-        if (parent >= 0)
-            dirs[static_cast<std::size_t>(parent)].children.push_back(index);
+        dirs.push_back({path, scope, parent, dir.total_disk});
         first_file.push_back(hashes.size());
         for (const Node& entry : dir.children) {
             if (!entry.is_dir)
@@ -248,21 +245,15 @@ std::vector<DuplicateDirPair> find_duplicate_dirs(const std::vector<Scope>& scop
     std::vector<std::uint32_t>().swap(by_rarity);
     std::vector<std::uint32_t>().swap(frequency);
 
-    // For each directory, the ranks of all files below it as a sorted
-    // multiset; children come after their parent, so they are done first.
+    // For each directory, the ranks of the files directly in it as a sorted
+    // multiset. Files of subdirectories do not count: a folder mostly made
+    // of one subfolder, such as a repository of its .git, would match it.
     std::vector<std::vector<std::uint32_t>> sets(count);
-    for (std::size_t i = count; i-- > 0;) {
+    for (std::size_t i = 0; i < count; ++i) {
         std::vector<std::uint32_t>& set = sets[i];
-        std::size_t size = first_file[i + 1] - first_file[i];
-        for (const int child : dirs[i].children)
-            size += sets[static_cast<std::size_t>(child)].size();
-        set.reserve(size);
+        set.reserve(first_file[i + 1] - first_file[i]);
         for (std::size_t f = first_file[i]; f < first_file[i + 1]; ++f)
             set.push_back(rank[ids[f]]);
-        for (const int child : dirs[i].children) {
-            const auto& sub = sets[static_cast<std::size_t>(child)];
-            set.insert(set.end(), sub.begin(), sub.end());
-        }
         std::sort(set.begin(), set.end());
     }
     std::vector<std::uint32_t>().swap(ids);

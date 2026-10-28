@@ -147,7 +147,8 @@ std::set<Pair> dir_pairs(ducat::Database& db, const fs::path& root,
     return result;
 }
 
-// The same, by comparing every two directories of the scan.
+// The same, by comparing every two directories of the scan by the files
+// directly in them.
 std::set<Pair> brute_force_pairs(const ducat::Node& root, const ducat::DuplicateDirOptions& options)
 {
     struct Dir {
@@ -155,22 +156,18 @@ std::set<Pair> brute_force_pairs(const ducat::Node& root, const ducat::Duplicate
         std::multiset<std::string> keys;
     };
     std::vector<Dir> dirs;
-    const auto collect = [&](auto& self, const ducat::Node& node, const std::string& path)
-        -> std::multiset<std::string> {
+    const auto collect = [&](auto& self, const ducat::Node& node, const std::string& path) -> void {
         std::multiset<std::string> keys;
         for (const ducat::Node& child : node.children) {
             const std::string child_path = path.empty() ? child.name : path + "/" + child.name;
-            if (child.is_dir) {
-                const auto sub = self(self, child, child_path);
-                keys.insert(sub.begin(), sub.end());
-            } else {
+            if (child.is_dir)
+                self(self, child, child_path);
+            else
                 keys.insert(options.names_only ? child.name
                                                : child.name + "/" + std::to_string(child.size));
-            }
         }
         if (!path.empty())
             dirs.push_back({path, keys});
-        return keys;
     };
     collect(collect, root, "");
 
@@ -221,28 +218,29 @@ void test_dirs()
     const ducat::ScanResult scan = ducat::scan_tree(root.string());
     db.store(scan);
 
-    // photos has 7 files with "empty"; backup 6 (no "empty"), partial 7 (no
-    // e.jpg, but g.jpg). backup holds only photos, so it stands for
-    // backup/photos, which is inside the pair; backup and partial share 5 of
-    // 7 (71 %); wrap and wrap/inner, one inside the other, never pair.
+    // Only files directly in a folder count, not those in sub/. photos has
+    // 6 with "empty"; backup/photos 5 (no "empty"), partial 6 (no e.jpg, but
+    // g.jpg). backup holds no files itself; backup/photos and partial share
+    // 4 of 6 (66 %); the sub folders hold 1 file each, under min_files.
     const std::set<Pair> pairs = dir_pairs(db, root, {});
-    CHECK(pairs == (std::set<Pair>{{"backup", "photos", 85u}, {"partial", "photos", 85u}}));
+    CHECK(pairs
+          == (std::set<Pair>{{"backup/photos", "photos", 83u}, {"partial", "photos", 83u}}));
 
     ducat::DuplicateDirOptions strict;
-    strict.threshold = 86;
+    strict.threshold = 84;
     CHECK(dir_pairs(db, root, strict).empty());
     ducat::DuplicateDirOptions loose;
-    loose.threshold = 70;
-    CHECK(dir_pairs(db, root, loose).count({"backup", "partial", 71u}));
+    loose.threshold = 60;
+    CHECK(dir_pairs(db, root, loose).count({"backup/photos", "partial", 66u}));
 
-    // By name, names (6 files, other sizes) matches backup fully.
+    // By name, names (5 files, other sizes) matches backup/photos fully.
     ducat::DuplicateDirOptions by_name;
     by_name.names_only = true;
     CHECK(dir_pairs(db, root, by_name)
-          == (std::set<Pair>{{"backup", "names", 100u},
-                             {"backup", "photos", 85u},
-                             {"names", "photos", 85u},
-                             {"partial", "photos", 85u}}));
+          == (std::set<Pair>{{"backup/photos", "names", 100u},
+                             {"backup/photos", "photos", 83u},
+                             {"names", "photos", 83u},
+                             {"partial", "photos", 83u}}));
 
     // Pruned search and brute force agree.
     for (const bool names_only : {false, true}) {
@@ -316,6 +314,23 @@ void test_scopes()
     const auto same = ducat::find_duplicate_dirs({{home.get(), {}}, {again.get(), {}}});
     CHECK(same.size() == 1 && same[0].similarity == 100 && same[0].first.path == photos
           && same[0].second.path == photos && same[0].first.scope != same[0].second.scope);
+
+    // A repository is no copy of its own .git, which holds most of its files,
+    // also when it is stored in two databases.
+    const fs::path repo = temp.path() / "repo";
+    write_file(repo / "README", 10);
+    write_file(repo / "main.cpp", 20);
+    for (int i = 0; i < 10; ++i)
+        write_file(repo / ".git" / ("object" + std::to_string(i)), 100 + i);
+    const auto repo_home = open("repo-home.ducat");
+    const auto repo_again = open("repo-again.ducat");
+    repo_home->store(ducat::scan_tree(repo.string()));
+    repo_again->store(ducat::scan_tree(repo.string()));
+    const auto repos = ducat::find_duplicate_dirs({{repo_home.get(), {}}, {repo_again.get(), {}}});
+    CHECK_EQ(repos.size(), 1u);
+    for (const auto& pair : repos)
+        CHECK(pair.first.path == (repo / ".git").string()
+              && pair.second.path == (repo / ".git").string());
 
     // A path holding stored trees, like a mount directory, stands for them; a
     // path inside another counts once; one neither stored nor holding stored

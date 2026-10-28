@@ -99,8 +99,9 @@ sizes only, without reading the files:
   the first. Files smaller than `--min-size` (1 byte) are left out, and so are
   hard links counted elsewhere, which take no space of their own.
 - With `--dirs`, pairs of directories sharing at least `--threshold` percent
-  (80) of the files below them, at any depth, counted against the directory
-  with more files. Files are compared by name and size, or with `--names` by
+  (80) of the files directly in them, counted against the directory with
+  more files. Files in subdirectories do not count, as a folder made mostly
+  of one subfolder, such as a repository of its `.git`, would match it. Files are compared by name and size, or with `--names` by
   name only, so that they may differ in size. Directories with fewer than
   `--min-files` files (5) are left out, a directory is never paired with one
   inside it, and only the topmost pairs are listed: `A/x` with `B/x` is left

@@ -53,11 +53,12 @@ std::vector<DuplicateFileGroup> find_duplicate_files(Database& db, std::string_v
 
 struct DuplicateDirOptions {
     // Least similarity in percent: the files the two directories share,
-    // divided by the files of the larger one, counting all files below them.
+    // divided by the files of the larger one, counting only the files
+    // directly in them, not in their subdirectories.
     unsigned threshold = 80;
     // Compare files by name only, so that they may differ in size.
     bool names_only = false;
-    // Directories with fewer files below them are left out.
+    // Directories with fewer files directly in them are left out.
     std::uint64_t min_files = 5;
 };
 
@@ -65,7 +66,7 @@ struct DuplicateDirOptions {
 struct DuplicateDirPair {
     Location first;                    // the larger, by files
     Location second;
-    std::uint64_t first_files = 0;     // files below each
+    std::uint64_t first_files = 0;     // files directly in each
     std::uint64_t second_files = 0;
     std::uint64_t shared = 0;          // files in both
     std::uint64_t first_disk = 0;
