@@ -6,6 +6,7 @@
 class QWidget;
 
 namespace ducat {
+class ArchivePlugin;
 class FileDialogPlugin;
 class ViewerPlugin;
 }
@@ -23,6 +24,9 @@ public:
     // The viewer plugin (F3), or null when none was loaded.
     ducat::ViewerPlugin* viewer() const { return viewer_; }
 
+    // The archive plugin, or null when none was loaded.
+    ducat::ArchivePlugin* archive() const { return archive_; }
+
     // What was found, for --plugins: one line per plugin file or problem.
     const QStringList& report() const { return report_; }
 
@@ -34,6 +38,7 @@ private:
 
     ducat::FileDialogPlugin* file_dialog_ = nullptr;
     ducat::ViewerPlugin* viewer_ = nullptr;
+    ducat::ArchivePlugin* archive_ = nullptr;
     QStringList report_;
 };
 

@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -109,6 +110,13 @@ private:
 
     void go_up();
     void open_entry(const QModelIndex& index);
+    // Shows a directory, from the database or an archive read from disk.
+    void show_directory(ducat::Node dir, const std::string& select);
+    // Reads the archive at `path` from disk and shows its contents, unstored.
+    void open_archive(const std::string& path);
+    // F5: scans the shown directory again, or stores the archive read from disk.
+    void refresh();
+    void store_live_archive();
     // Whether `path` lies in the stored contents of an archive, not on disk.
     bool inside_contents(const std::string& path);
     void open_typed_path();
@@ -137,6 +145,7 @@ private:
     QAction* refresh_action_;
     QAction* scan_action_;
     QAction* one_file_system_action_;
+    QAction* archives_action_;
     QAction* database_action_;
     QMenu* trees_menu_;
     SearchDialog* search_dialog_ = nullptr; // created when first needed
@@ -151,6 +160,15 @@ private:
     std::mutex database_mutex_;
     std::unique_ptr<ducat::ScanProgress> progress_;
     std::atomic<bool> storing_ = false;
+    std::atomic<bool> reading_archives_ = false;
+
+    // An archive read from disk, not stored, while it or a folder in it is
+    // shown.
+    struct LiveArchive {
+        std::string path;
+        ducat::Node root;
+    };
+    std::optional<LiveArchive> live_;
     std::string scan_path_;
     std::uint64_t expected_entries_ = 0; // from the stored data, 0 if unknown
     std::thread scan_thread_;

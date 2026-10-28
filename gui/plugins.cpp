@@ -1,5 +1,6 @@
 #include "plugins.hpp"
 
+#include "ducat/plugin/archive.hpp"
 #include "ducat/plugin/file_dialog.hpp"
 #include "ducat/plugin/viewer.hpp"
 
@@ -62,6 +63,10 @@ Plugins::Plugins()
             }
             if (auto* viewer = qobject_cast<ducat::ViewerPlugin*>(plugin)) {
                 take(viewer, viewer_, "viewer");
+                continue;
+            }
+            if (auto* archive = qobject_cast<ducat::ArchivePlugin*>(plugin)) {
+                take(archive, archive_, "archives");
                 continue;
             }
             report_ << QStringLiteral("%1: not a ducat plugin").arg(file);

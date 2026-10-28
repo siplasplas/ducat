@@ -6,12 +6,15 @@
 #include "search_dialog.hpp"
 #include "usage_delegate.hpp"
 
+#include "ducat/archive.hpp"
 #include "ducat/database.hpp"
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
+#include "ducat/plugin/archive.hpp"
 #include "ducat/plugin/viewer.hpp"
 
 #include <QAction>
+#include <QApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QHeaderView>
@@ -21,6 +24,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QMenu>
+#include <QMenuBar>
 #include <QProgressBar>
 #include <QSettings>
 #include <QStatusBar>
@@ -30,6 +34,7 @@
 #include <QToolButton>
 #include <QTreeView>
 
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
@@ -54,6 +59,12 @@ std::string parent_of(const std::string& path)
     return slash == 0 ? "/" : path.substr(0, slash);
 }
 
+bool is_inside(const std::string& path, const std::string& dir)
+{
+    return dir == "/" ? path != "/"
+                      : path.size() > dir.size() && path.starts_with(dir) && path[dir.size()] == '/';
+}
+
 } // namespace
 
 MainWindow::MainWindow(std::string database, QWidget* parent)
@@ -62,22 +73,88 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
       progress_label_(new QLabel(this)), progress_bar_(new QProgressBar(this)),
       cancel_button_(new QToolButton(this)), progress_timer_(new QTimer(this))
 {
-    QToolBar* toolbar = addToolBar(tr("Navigation"));
-    toolbar->setMovable(false);
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-
     // Icons from the desktop theme, with Qt's own as a fallback.
     const auto icon = [this](const char* name, QStyle::StandardPixmap fallback) {
         return QIcon::fromTheme(QString::fromLatin1(name), style()->standardIcon(fallback));
     };
 
-    QAction* up = toolbar->addAction(icon("go-up", QStyle::SP_FileDialogToParent), tr("Up"), this,
+    // All actions are in the menus; the toolbar holds the frequent ones.
+    QMenu* file_menu = menuBar()->addMenu(tr("&File"));
+    QMenu* go_menu = menuBar()->addMenu(tr("&Go"));
+    QMenu* tools_menu = menuBar()->addMenu(tr("&Tools"));
+    QMenu* options_menu = menuBar()->addMenu(tr("&Options"));
+
+    scan_action_ = file_menu->addAction(icon("folder-open", QStyle::SP_DirIcon),
+                                        tr("&Scan Folder…"), this, &MainWindow::choose_and_scan);
+    scan_action_->setShortcut(QKeySequence::Open);
+    scan_action_->setToolTip(tr("Choose a folder and scan it into the database (Ctrl+O)"));
+
+    refresh_action_ = file_menu->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
+                                           tr("&Refresh"), this, &MainWindow::refresh);
+    refresh_action_->setShortcut(QKeySequence::Refresh);
+    refresh_action_->setToolTip(tr("Scan the shown directory again, or store the archive read "
+                                   "from disk (F5)"));
+
+    file_menu->addSeparator();
+    database_action_ = file_menu->addAction(icon("document-open", QStyle::SP_DialogOpenButton),
+                                            tr("&Database…"), this, &MainWindow::choose_database);
+    database_action_->setShortcut(Qt::CTRL | Qt::Key_D);
+    file_menu->addSeparator();
+    file_menu->addAction(icon("application-exit", QStyle::SP_DialogCloseButton), tr("&Quit"),
+                         QKeySequence::Quit, this, &QWidget::close);
+
+    QAction* up = go_menu->addAction(icon("go-up", QStyle::SP_FileDialogToParent), tr("&Up"), this,
                                      &MainWindow::go_up);
     up->setShortcuts({QKeySequence(Qt::ALT | Qt::Key_Up), QKeySequence(Qt::Key_Backspace)});
     up->setToolTip(tr("Go to the parent directory (Alt+Up, Backspace)"));
-
-    trees_menu_ = new QMenu(this);
+    trees_menu_ = go_menu->addMenu(icon("drive-harddisk", QStyle::SP_DriveHDIcon), tr("&Trees"));
     connect(trees_menu_, &QMenu::aboutToShow, this, &MainWindow::fill_trees_menu);
+
+    QAction* find = tools_menu->addAction(icon("edit-find", QStyle::SP_FileDialogContentsView),
+                                          tr("&Find…"), this, &MainWindow::show_search);
+    find->setShortcut(QKeySequence::Find);
+    find->setToolTip(tr("Search the stored entries by name, type, size, files or time (Ctrl+F)"));
+    QAction* view = tools_menu->addAction(
+        icon("document-preview", QStyle::SP_FileDialogDetailedView), tr("&View"), this, [this] {
+            const QModelIndex index = view_->currentIndex();
+            if (index.isValid() && !current_.empty())
+                view_file(current_, model_->entry(index.row()));
+        });
+    view->setShortcut(Qt::Key_F3);
+    view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
+    QAction* duplicates = tools_menu->addAction(icon("edit-copy", QStyle::SP_FileDialogListView),
+                                                tr("&Duplicates…"), this,
+                                                &MainWindow::show_duplicates);
+    duplicates->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_D);
+    duplicates->setToolTip(tr("Find probable duplicate files and similar folders among the "
+                              "stored ones, also across drives (Ctrl+Shift+D)"));
+
+    one_file_system_action_ = options_menu->addAction(tr("&One File System"));
+    one_file_system_action_->setCheckable(true);
+    one_file_system_action_->setChecked(QSettings().value(QStringLiteral("scan/one_file_system"),
+                                                          true).toBool());
+    one_file_system_action_->setToolTip(
+        tr("Do not descend into other file systems when scanning, like du -x"));
+    archives_action_ = options_menu->addAction(tr("Read &Archives When Scanning"));
+    archives_action_->setCheckable(true);
+    archives_action_->setChecked(QSettings().value(QStringLiteral("scan/archives"), false).toBool());
+    archives_action_->setToolTip(tr("Store the contents of archives too; slower. Contents "
+                                    "stored before stay for archives that did not change."));
+    archives_action_->setEnabled(Plugins::instance().archive() != nullptr);
+    if (!archives_action_->isEnabled())
+        archives_action_->setChecked(false);
+    connect(one_file_system_action_, &QAction::toggled, this, [](bool on) {
+        QSettings().setValue(QStringLiteral("scan/one_file_system"), on);
+    });
+    connect(archives_action_, &QAction::toggled, this, [](bool on) {
+        QSettings().setValue(QStringLiteral("scan/archives"), on);
+    });
+
+    QToolBar* toolbar = addToolBar(tr("Navigation"));
+    toolbar->setMovable(false);
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    toolbar->addAction(up);
+    toolbar->addAction(refresh_action_);
     auto* trees = new QToolButton(this);
     trees->setText(tr("Trees"));
     trees->setIcon(icon("drive-harddisk", QStyle::SP_DriveHDIcon));
@@ -86,55 +163,8 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     trees->setPopupMode(QToolButton::InstantPopup);
     trees->setMenu(trees_menu_);
     toolbar->addWidget(trees);
-
-    QAction* find = toolbar->addAction(icon("edit-find", QStyle::SP_FileDialogContentsView),
-                                       tr("Find…"), this, &MainWindow::show_search);
-    find->setShortcut(QKeySequence::Find);
-    find->setToolTip(tr("Search the stored entries by name, type, size, files or time (Ctrl+F)"));
-
-    QAction* view = toolbar->addAction(icon("document-preview", QStyle::SP_FileDialogDetailedView),
-                                       tr("View"), this, [this] {
-                                           const QModelIndex index = view_->currentIndex();
-                                           if (index.isValid() && !current_.empty())
-                                               view_file(current_, model_->entry(index.row()));
-                                       });
-    view->setShortcut(Qt::Key_F3);
-    view->setToolTip(tr("Show the selected file, when its drive is mounted (F3)"));
-
-    QAction* duplicates = toolbar->addAction(icon("edit-copy", QStyle::SP_FileDialogListView),
-                                             tr("Duplicates…"), this,
-                                             &MainWindow::show_duplicates);
-    duplicates->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_D);
-    duplicates->setToolTip(tr("Find probable duplicate files and similar folders among the "
-                              "stored ones, also across drives (Ctrl+Shift+D)"));
-
-    refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
-                                         tr("Refresh"), this, [this] {
-                                             // Not on disk: a refresh would remove it.
-                                             if (inside_contents(current_))
-                                                 show_error(tr("The contents of an archive are "
-                                                               "refreshed with the folder "
-                                                               "holding the archive"));
-                                             else
-                                                 start_scan(current_);
-                                         });
-    refresh_action_->setShortcut(QKeySequence::Refresh);
-    refresh_action_->setToolTip(tr("Scan the shown directory again (F5)"));
-
-    scan_action_ = toolbar->addAction(icon("folder-open", QStyle::SP_DirIcon),
-                                      tr("Scan Folder…"), this, &MainWindow::choose_and_scan);
-    scan_action_->setShortcut(QKeySequence::Open);
-    scan_action_->setToolTip(tr("Choose a folder and scan it into the database (Ctrl+O)"));
-
-    one_file_system_action_ = toolbar->addAction(tr("One file system"));
-    one_file_system_action_->setCheckable(true);
-    one_file_system_action_->setChecked(true);
-    one_file_system_action_->setToolTip(
-        tr("Do not descend into other file systems when scanning, like du -x"));
-
-    database_action_ = toolbar->addAction(icon("document-open", QStyle::SP_DialogOpenButton),
-                                          tr("Database…"), this, &MainWindow::choose_database);
-    database_action_->setShortcut(Qt::CTRL | Qt::Key_D);
+    toolbar->addAction(find);
+    toolbar->addAction(view);
 
     path_edit_->setClearButtonEnabled(true);
     connect(path_edit_, &QLineEdit::returnPressed, this, &MainWindow::open_typed_path);
@@ -192,6 +222,32 @@ MainWindow::~MainWindow()
 
 bool MainWindow::open_directory(const std::string& path, const std::string& select)
 {
+    // Inside an archive read from disk: from that listing, not the database.
+    if (live_ && (path == live_->path || is_inside(path, live_->path))) {
+        const ducat::Node* node = &live_->root;
+        std::string_view rest = std::string_view(path).substr(live_->path.size());
+        while (node && !rest.empty()) {
+            rest.remove_prefix(1); // '/'
+            const std::size_t slash = rest.find('/');
+            const std::string_view name = rest.substr(0, slash);
+            rest = slash == std::string_view::npos ? std::string_view() : rest.substr(slash);
+            const auto it = std::find_if(node->children.begin(), node->children.end(),
+                                         [&](const ducat::Node& c) { return c.is_dir && c.name == name; });
+            node = it == node->children.end() ? nullptr : &*it;
+        }
+        if (!node) {
+            show_error(tr("%1 is not in the archive").arg(to_qstring(path)));
+            return false;
+        }
+        ducat::Node dir = *node;
+        dir.name = path;
+        show_directory(std::move(dir), select);
+        statusBar()->showMessage(tr("Read from the archive on disk, not stored; Refresh (F5) "
+                                    "stores it"));
+        return true;
+    }
+    live_.reset();
+
     std::optional<ducat::Node> dir;
     {
         const std::unique_lock lock(database_mutex_, std::try_to_lock);
@@ -212,7 +268,13 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
                        .arg(to_qstring(path)));
         return false;
     }
+    show_directory(std::move(*dir), select);
+    return true;
+}
 
+void MainWindow::show_directory(ducat::Node dir_node, const std::string& select)
+{
+    std::optional<ducat::Node> dir(std::move(dir_node));
     current_ = dir->name;
     totals_->setText(tr("Disk usage %1, size %2, %3 files, %4 folders")
                          .arg(to_qstring(ducat::format_size(dir->total_disk)),
@@ -231,7 +293,77 @@ bool MainWindow::open_directory(const std::string& path, const std::string& sele
     view_->setCurrentIndex(index);
     view_->scrollTo(index);
     view_->setFocus();
-    return true;
+}
+
+void MainWindow::open_archive(const std::string& path)
+{
+    if (live_ && is_inside(path, live_->path)) {
+        show_error(tr("Archives inside archives are not opened"));
+        return;
+    }
+    ducat::ArchivePlugin* plugin = Plugins::instance().archive();
+    if (!plugin) {
+        show_error(tr("The archive plugin is not installed; see ducat-gui --plugins"));
+        return;
+    }
+    if (!QFileInfo(to_qstring(path)).isFile()) {
+        show_error(tr("%1 is not on disk now, and its contents are not stored")
+                       .arg(to_qstring(path)));
+        return;
+    }
+    std::string error;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    std::optional<ducat::Node> root = plugin->list(path, error);
+    QApplication::restoreOverrideCursor();
+    if (!root) {
+        show_error(tr("%1: %2").arg(to_qstring(path), QString::fromStdString(error)));
+        return;
+    }
+    live_ = LiveArchive{path, std::move(*root)};
+    open_directory(path);
+}
+
+void MainWindow::refresh()
+{
+    if (live_ && (current_ == live_->path || is_inside(current_, live_->path))) {
+        store_live_archive();
+        return;
+    }
+    // Not on disk: a refresh would remove it.
+    if (inside_contents(current_)) {
+        show_error(tr("The contents of an archive are refreshed with the folder holding the "
+                      "archive"));
+        return;
+    }
+    start_scan(current_);
+}
+
+void MainWindow::store_live_archive()
+{
+    if (scan_thread_.joinable()) {
+        show_error(tr("Wait for the scan to end"));
+        return;
+    }
+    {
+        const std::unique_lock lock(database_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            show_error(tr("The database is being written; try again in a moment"));
+            return;
+        }
+        try {
+            ducat::Database db(database_, ducat::Database::Mode::write);
+            db.store_contents(live_->path, live_->root);
+            db.close();
+        } catch (const ducat::DatabaseError& e) {
+            show_error(QString::fromUtf8(e.what()));
+            return;
+        }
+    }
+    const std::string archive = live_->path;
+    const std::string shown = current_;
+    live_.reset();
+    open_directory(shown);
+    statusBar()->showMessage(tr("Stored the contents of %1").arg(to_qstring(archive)));
 }
 
 bool MainWindow::open_first_directory()
@@ -283,9 +415,11 @@ void MainWindow::start_scan(const std::string& path)
     statusBar()->clearMessage();
     progress_ = std::make_unique<ducat::ScanProgress>();
     storing_ = false;
+    reading_archives_ = false;
     refresh_action_->setEnabled(false);
     scan_action_->setEnabled(false);
     one_file_system_action_->setEnabled(false);
+    archives_action_->setEnabled(false);
     database_action_->setEnabled(false);
     progress_label_->show();
     progress_bar_->show();
@@ -297,13 +431,25 @@ void MainWindow::start_scan(const std::string& path)
     ducat::ScanOptions options;
     options.one_file_system = one_file_system_action_->isChecked();
     options.progress = progress_.get();
+    // The plugin's methods may run on the scan thread; it lives as long as
+    // the program.
+    ducat::ArchivePlugin* archives = archives_action_->isChecked()
+        ? Plugins::instance().archive()
+        : nullptr;
 
-    scan_thread_ = std::thread([this, path, options] {
+    scan_thread_ = std::thread([this, path, options, archives] {
         ScanOutcome outcome;
         outcome.root = ducat::resolve_path(path);
         const auto start = std::chrono::steady_clock::now();
         try {
             ducat::PreparedRefresh prepared = ducat::prepare_refresh(path, options);
+            std::size_t archive_errors = 0;
+            if (archives && prepared.scan) {
+                reading_archives_ = true;
+                archive_errors = archives->read_archives(*prepared.scan).size();
+            }
+            outcome.errors += archive_errors;
+            reading_archives_ = false;
             storing_ = true;
             const std::lock_guard lock(database_mutex_);
             std::error_code ignored;
@@ -314,7 +460,7 @@ void MainWindow::start_scan(const std::string& path)
             db.close();
             outcome.removed = result.removed;
             outcome.entries = result.scan.root.files + result.scan.root.dirs;
-            outcome.errors = result.scan.errors.size();
+            outcome.errors += result.scan.errors.size();
         } catch (const ducat::ScanCancelled&) {
             outcome.cancelled = true;
         } catch (const std::system_error& e) {
@@ -335,8 +481,9 @@ void MainWindow::update_progress()
     if (!progress_)
         return;
     const std::uint64_t entries = progress_->entries.load(std::memory_order_relaxed);
-    if (storing_) {
-        progress_label_->setText(tr("Saving to the database…"));
+    if (storing_ || reading_archives_) {
+        progress_label_->setText(storing_ ? tr("Saving to the database…")
+                                          : tr("Reading archives…"));
         cancel_button_->setEnabled(false);
         progress_bar_->setRange(0, 0);
         return;
@@ -365,6 +512,7 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
     refresh_action_->setEnabled(true);
     scan_action_->setEnabled(true);
     one_file_system_action_->setEnabled(true);
+    archives_action_->setEnabled(Plugins::instance().archive() != nullptr);
     database_action_->setEnabled(true);
 
     if (outcome.cancelled) {
@@ -651,9 +799,13 @@ void MainWindow::open_entry(const QModelIndex& index)
     if (!index.isValid() || current_.empty())
         return;
     const ducat::Node& entry = model_->entry(index.row());
-    // An archive with stored contents opens like a folder.
+    // An archive with stored contents opens like a folder; another one is
+    // read from disk.
+    const std::string path = ducat::join_path(current_, entry.name);
     if (entry.is_dir || entry.has_contents)
-        open_directory(ducat::join_path(current_, entry.name));
+        open_directory(path);
+    else if (ducat::is_archive_name(entry.name))
+        open_archive(path);
 }
 
 bool MainWindow::inside_contents(const std::string& path)

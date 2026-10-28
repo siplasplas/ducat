@@ -46,3 +46,6 @@ endfunction()
 
 add_subdirectory(filedialog)
 add_subdirectory(viewer)
+if(TARGET ducat::archive)
+    add_subdirectory(archive)
+endif()

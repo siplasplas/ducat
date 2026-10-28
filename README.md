@@ -132,9 +132,12 @@ archive's list are made up from the paths; an entry's disk usage is its size
 rounded up to 512 bytes.
 
 `ducat find -a` and, in the GUI, Find with Also inside stored archives look
-into stored contents; Enter on such an archive in the GUI opens them. The
-database format "ducat 2" for this reads older databases and marks them as
-format 2 when they are written.
+into stored contents. In the GUI, Enter on an archive opens its stored
+contents, or else, with the archive plugin, reads the archive on disk and
+shows its contents without storing them; Refresh (F5) there stores them.
+Options > Read Archives When Scanning makes the GUI's scans store archives as
+`scan -a` does. The database format "ducat 2" for this reads older databases
+and marks them as format 2 when they are written.
 
 ### Databases
 
@@ -180,8 +183,10 @@ Scan Folder (Ctrl+O) scans a chosen folder into the database, and Refresh (F5)
 scans the shown directory again, which updates the directories above it as
 `ducat scan` does. Scans run in the background, with the number of entries
 read and, when refreshing, the progress against the stored count; the button
-next to them stops a scan without changing the database. One file system,
-on by default, keeps scans from descending into other file systems.
+next to them stops a scan without changing the database. Options > One File
+System, on by default, keeps scans from descending into other file systems.
+All actions are in the menus File, Go, Tools and Options; the toolbar holds
+the frequent ones.
 
 Duplicates… (Ctrl+Shift+D) finds probable duplicates among the stored entries
 as `ducat dups` does, also across drives and databases: files with the same
@@ -247,6 +252,8 @@ fetches their dependencies from GitHub, which needs network access once;
   definitions are read from, and downloaded to, `~/.local/share/kate-data`,
   shared with the other programs using qcodeedit. Without the plugin, F3 does
   nothing but say so.
+- `ducat-archive-plugin`: reading archives with libarchive, built when
+  libarchive is found: Enter on an archive on disk and scans with archives.
 
 `ducat-gui` loads plugins from the directories in `$DUCAT_PLUGIN_PATH`
 (separated by `:`), from `lib/ducat/plugins` of its installation and, when run
