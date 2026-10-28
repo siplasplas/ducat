@@ -1,6 +1,7 @@
 #include "main_window.hpp"
 
 #include "directory_model.hpp"
+#include "plugins.hpp"
 #include "search_dialog.hpp"
 #include "usage_delegate.hpp"
 
@@ -10,7 +11,6 @@
 
 #include <QAction>
 #include <QDir>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHeaderView>
 #include <QIcon>
@@ -450,16 +450,13 @@ void MainWindow::fill_trees_menu()
 
 void MainWindow::choose_database()
 {
-    // Qt's own dialog, like Scan Folder. A new name is accepted too, with
-    // .ducat added when it has no extension; the first scan creates the file.
-    QFileDialog dialog(this, tr("Open or Create Database"), to_qstring(database_),
-                       tr("ducat databases (*.ducat);;All files (*)"));
-    dialog.setAcceptMode(QFileDialog::AcceptSave);
-    dialog.setOptions(QFileDialog::DontUseNativeDialog | QFileDialog::DontConfirmOverwrite);
-    dialog.setDefaultSuffix(QStringLiteral("ducat"));
-    dialog.selectFile(to_qstring(database_));
-    if (dialog.exec() == QDialog::Accepted && !dialog.selectedFiles().isEmpty())
-        set_database(dialog.selectedFiles().first().toStdString());
+    // A new name is accepted too, with .ducat added when it has no
+    // extension; the first scan creates the file.
+    const QString chosen = choose_file(this, tr("Open or Create Database"), to_qstring(database_),
+                                       tr("ducat databases (*.ducat);;All files (*)"),
+                                       QStringLiteral("ducat"));
+    if (!chosen.isEmpty())
+        set_database(chosen.toStdString());
 }
 
 QString MainWindow::check_database(const std::string& file)
@@ -517,10 +514,7 @@ void MainWindow::update_title()
 void MainWindow::choose_and_scan()
 {
     const QString start = current_.empty() ? QDir::homePath() : to_qstring(current_);
-    // Qt's own dialog rather than the platform's.
-    const QString dir = QFileDialog::getExistingDirectory(
-        this, tr("Scan Folder"), start,
-        QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+    const QString dir = choose_directory(this, tr("Scan Folder"), start);
     if (!dir.isEmpty())
         start_scan(dir.toStdString());
 }

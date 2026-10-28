@@ -1,4 +1,5 @@
 #include "main_window.hpp"
+#include "plugins.hpp"
 
 #include "ducat/database.hpp"
 #include "ducat/path.hpp"
@@ -38,10 +39,25 @@ int main(int argc, char* argv[])
             .arg(QString::fromStdString(ducat::default_database_path())),
         QApplication::translate("main", "FILE"));
     parser.addOption(database_option);
+    const QCommandLineOption plugins_option(
+        QStringLiteral("plugins"),
+        QApplication::translate("main", "List the plugin directories and plugins, then exit."));
+    parser.addOption(plugins_option);
     parser.addPositionalArgument(
         "path", QApplication::translate("main", "Directory to show (default: the first stored)."),
         "[PATH]");
     parser.process(app);
+
+    if (parser.isSet(plugins_option)) {
+        std::printf("Plugin directories:\n");
+        for (const QString& dir : Plugins::directories())
+            std::printf("  %s\n", qPrintable(dir));
+        const QStringList& report = Plugins::instance().report();
+        std::printf("Plugins:%s\n", report.isEmpty() ? " none" : "");
+        for (const QString& line : report)
+            std::printf("  %s\n", qPrintable(line));
+        return 0;
+    }
 
     // -d, else the database chosen last in the GUI if it is still a ducat
     // database, else the default one.

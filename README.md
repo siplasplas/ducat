@@ -148,6 +148,22 @@ cannot.
 The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
 (`sudo apt install qt6-base-dev`); `-DDUCAT_BUILD_GUI=OFF` skips it.
 
+### Plugins
+
+Features with further dependencies come as plugins of the GUI, so that
+`ducat-gui` itself depends only on Qt and works without them. Configuring
+fetches their dependencies from GitHub, which needs network access once;
+`-DDUCAT_BUILD_PLUGINS=OFF` skips the plugins. There is one so far:
+
+- `ducat-filedialog`: the file dialogs of
+  [qt-extra](https://github.com/siplasplas/qt-extra) (`QxFileDialog`) for Scan
+  Folder and Database; without it, Qt's own dialogs are used.
+
+`ducat-gui` loads plugins from the directories in `$DUCAT_PLUGIN_PATH`
+(separated by `:`), from `lib/ducat/plugins` of its installation and, when run
+from the build directory, from `build/plugins`. `ducat-gui --plugins` lists the
+directories and what was loaded, or why not.
+
 Pass `-DBUILD_SHARED_LIBS=ON` to build `libducat` as a shared library.
 
 ## Installing
@@ -160,8 +176,8 @@ cmake --install build --prefix ~/.local     # for the current user only
 This installs `ducat` and `ducat-gui` to `bin`, and with the GUI also
 `share/applications/ducat.desktop` and the icon
 `share/icons/hicolor/scalable/apps/ducat.svg`, so ducat appears in the menu of
-the desktop. A shared `libducat` goes to `lib`, where the installed programs
-find it. Remove the files listed in `build/install_manifest.txt` to uninstall.
+the desktop. Plugins go to `lib/ducat/plugins`, and a shared `libducat` to
+`lib`, where the installed programs find it. Remove the files listed in `build/install_manifest.txt` to uninstall.
 
 ## Tests
 

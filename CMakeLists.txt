@@ -36,10 +36,21 @@ if(DUCAT_BUILD_GUI)
     endif()
 endif()
 
+# Plugins of the GUI: installed to lib/ducat/plugins, built into
+# build/plugins, where ducat-gui finds them when run from the build tree.
+option(DUCAT_BUILD_PLUGINS "Build the GUI plugins; fetches their dependencies" ON)
+set(DUCAT_PLUGIN_INSTALL_DIR "${CMAKE_INSTALL_LIBDIR}/ducat/plugins")
+set(DUCAT_PLUGIN_BUILD_DIR "${CMAKE_BINARY_DIR}/plugins")
+add_library(ducat_plugin_api INTERFACE)
+target_include_directories(ducat_plugin_api INTERFACE "${PROJECT_SOURCE_DIR}/plugin-api")
+
 add_subdirectory(libducat)
 add_subdirectory(cli)
 if(DUCAT_BUILD_GUI AND Qt6_FOUND)
     add_subdirectory(gui)
+    if(DUCAT_BUILD_PLUGINS)
+        add_subdirectory(plugins)
+    endif()
     install(FILES res/ducat.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(FILES res/ducat.svg
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
