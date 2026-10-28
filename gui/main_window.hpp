@@ -88,8 +88,20 @@ public:
     void view_file(const std::string& folder, const ducat::Node& entry);
 
     // Opens the file `name` in `folder` in the plugin's editor (F4) when it
-    // is on disk now; saving it updates the database.
-    void edit_file(const std::string& folder, const ducat::Node& entry);
+    // is on disk now; saving it updates `database`, by default the shown one.
+    void edit_file(const std::string& folder, const ducat::Node& entry,
+                   const std::string& database = {});
+
+    // Brings the entries at `paths` up to date in `database`, by default the
+    // shown one, after a file operation (see ducat::update_entry); explains
+    // a failure in the status bar.
+    bool update_entries(const std::vector<std::string>& paths, const std::string& database = {});
+
+    // Reads the shown directory again, keeping the selected entry.
+    void reload_shown();
+
+    // Whether a scan runs, writing the shown database.
+    bool scanning() const { return scan_thread_.joinable(); }
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -136,9 +148,6 @@ private:
     // Whether the shown folder can be changed on disk now; else explains in
     // the status bar.
     bool check_on_disk();
-    // Brings the entries at `paths` up to date in the database after a file
-    // operation (see ducat::update_entry); explains a failure.
-    bool update_entries(const std::vector<std::string>& paths);
     void store_live_archive();
     // Removes the stored contents of the archives below the shown folder.
     void strip_archives();

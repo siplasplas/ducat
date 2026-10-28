@@ -30,7 +30,12 @@ public:
     void clear_results();
 
 private:
+    enum class Operation { copy, move, trash };
+
     void run_search();
+    // F5, F6, F8: copies, moves or trashes the selected matches; a match
+    // inside another selected folder goes with that folder.
+    void operate(Operation operation);
     void clear_criteria();
     void open_result(const QModelIndex& index);
 

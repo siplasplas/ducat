@@ -17,7 +17,6 @@
 
 #include <QAction>
 #include <QApplication>
-#include <QCheckBox>
 #include <QCloseEvent>
 #include <QDir>
 #include <QFile>
@@ -33,7 +32,6 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressBar>
-#include <QPushButton>
 #include <QSettings>
 #include <QStatusBar>
 #include <QStyle>
@@ -443,8 +441,10 @@ bool MainWindow::check_on_disk()
     return true;
 }
 
-bool MainWindow::update_entries(const std::vector<std::string>& paths)
+bool MainWindow::update_entries(const std::vector<std::string>& paths, const std::string& database)
 {
+    if (paths.empty())
+        return true;
     const std::unique_lock lock(database_mutex_, std::try_to_lock);
     if (!lock.owns_lock()) {
         show_error(tr("The database is being written; refresh the folder later"));
@@ -452,7 +452,7 @@ bool MainWindow::update_entries(const std::vector<std::string>& paths)
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     try {
-        ducat::Database db(database_, ducat::Database::Mode::write);
+        ducat::Database db(database.empty() ? database_ : database, ducat::Database::Mode::write);
         ducat::ScanOptions options;
         options.one_file_system = one_file_system_action_->isChecked();
         for (const std::string& path : paths)
@@ -465,6 +465,12 @@ bool MainWindow::update_entries(const std::vector<std::string>& paths)
     }
     QApplication::restoreOverrideCursor();
     return true;
+}
+
+void MainWindow::reload_shown()
+{
+    if (!current_.empty())
+        open_directory(current_, selected_name());
 }
 
 void MainWindow::new_folder()
@@ -628,47 +634,10 @@ void MainWindow::transfer(TransferKind kind)
     }
 
     // Conflicts are settled before the work starts.
-    std::vector<TransferItem> work;
+    std::vector<TransferItem> work = std::move(items);
     QStringList skipped;
-    std::optional<bool> overwrite_all;
-    for (TransferItem item : items) {
-        if (item.target == item.source || is_inside(item.target, item.source)) {
-            skipped << tr("%1 cannot go into itself").arg(to_qstring(item.source));
-            continue;
-        }
-        const QFileInfo target(to_qstring(item.target));
-        if (target.exists() || target.isSymLink()) {
-            bool overwrite = false;
-            if (overwrite_all) {
-                overwrite = *overwrite_all;
-            } else {
-                QMessageBox box(QMessageBox::Question, copying ? tr("Copy") : tr("Move"),
-                                tr("%1 already exists.").arg(to_qstring(item.target)),
-                                QMessageBox::NoButton, this);
-                box.setInformativeText(target.isDir()
-                                           ? tr("Overwrite merges the folders, replacing the "
-                                                "files of the same names.")
-                                           : tr("Overwrite replaces it."));
-                QPushButton* replace = box.addButton(tr("&Overwrite"), QMessageBox::AcceptRole);
-                QPushButton* skip = box.addButton(tr("&Skip"), QMessageBox::RejectRole);
-                box.addButton(QMessageBox::Cancel);
-                auto* all = new QCheckBox(tr("Do the same for the other conflicts"), &box);
-                box.setCheckBox(all);
-                box.exec();
-                if (box.clickedButton() != replace && box.clickedButton() != skip)
-                    return;
-                overwrite = box.clickedButton() == replace;
-                if (all->isChecked())
-                    overwrite_all = overwrite;
-            }
-            if (!overwrite) {
-                skipped << tr("%1 exists, skipped").arg(to_qstring(item.target));
-                continue;
-            }
-            item.overwrite = true;
-        }
-        work.push_back(std::move(item));
-    }
+    if (!settle_conflicts(this, copying ? tr("Copy") : tr("Move"), work, skipped))
+        return;
     QSettings().setValue(key, to_qstring(folder));
 
     const TransferResult result = run_transfer(this, kind, work);
@@ -696,14 +665,9 @@ void MainWindow::transfer(TransferKind kind)
                               : tr("Moved to %1").arg(to_qstring(folder));
     if (result.cancelled)
         message = tr("Stopped; the files done so far stay");
-    if (!problems.isEmpty()) {
+    if (!problems.isEmpty())
         message += tr("; %n problems", nullptr, static_cast<int>(problems.size()));
-        QMessageBox box(QMessageBox::Warning, copying ? tr("Copy") : tr("Move"),
-                        tr("Not everything was done."), QMessageBox::Ok, this);
-        box.setDetailedText(problems.join(QLatin1Char('\n')));
-        box.setInformativeText(problems.mid(0, 5).join(QLatin1Char('\n')));
-        box.exec();
-    }
+    show_problems(this, copying ? tr("Copy") : tr("Move"), problems);
     statusBar()->showMessage(message);
 }
 
@@ -1063,7 +1027,8 @@ void MainWindow::view_file(const std::string& folder, const ducat::Node& entry)
     viewer->view_file(this, path);
 }
 
-void MainWindow::edit_file(const std::string& folder, const ducat::Node& entry)
+void MainWindow::edit_file(const std::string& folder, const ducat::Node& entry,
+                           const std::string& database)
 {
     if (entry.is_dir) {
         show_error(tr("Edit opens files; Enter opens a folder"));
@@ -1085,9 +1050,10 @@ void MainWindow::edit_file(const std::string& folder, const ducat::Node& entry)
         return;
     }
     // A saved file gets its new size and time in the database.
-    viewer->edit_file(this, path, [this](const QString& saved) {
+    const std::string target = database.empty() ? database_ : database;
+    viewer->edit_file(this, path, [this, target](const QString& saved) {
         const std::string file = ducat::normalize_path(saved.toStdString());
-        if (!update_entries({file}))
+        if (!update_entries({file}, target))
             return;
         if (parent_of(file) == current_)
             open_directory(current_, selected_name());

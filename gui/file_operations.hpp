@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 #include <string>
 #include <vector>
@@ -28,6 +29,16 @@ struct TransferResult {
 // `start` and a Browse button.
 QString ask_destination(QWidget* parent, const QString& title, const QString& label,
                         const QString& start);
+
+// Asks what to do with each item whose target exists: overwrite (sets
+// TransferItem::overwrite) or skip (drops the item, adding a line to
+// `skipped`), once or for all of them. Also drops items whose target lies in
+// their source. Returns false when the user cancelled the whole work.
+bool settle_conflicts(QWidget* parent, const QString& title, std::vector<TransferItem>& items,
+                      QStringList& skipped);
+
+// Shows the problems of a file operation, if any, in a message box.
+void show_problems(QWidget* parent, const QString& title, const QStringList& problems);
 
 // Copies or moves the items on a background thread while showing progress
 // in a modal dialog. A move within a file system renames; across file

@@ -2,15 +2,18 @@
 
 #include "plugins.hpp"
 
+#include <QCheckBox>
 #include <QCompleter>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QEventLoop>
+#include <QFileInfo>
 #include <QFileSystemModel>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QProgressDialog>
 #include <QPushButton>
 #include <QTimer>
@@ -23,6 +26,7 @@
 #include <filesystem>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <thread>
 
 #include <dirent.h>
@@ -335,6 +339,67 @@ QString ask_destination(QWidget* parent, const QString& title, const QString& la
     if (dialog.exec() != QDialog::Accepted)
         return {};
     return edit->text().trimmed();
+}
+
+bool settle_conflicts(QWidget* parent, const QString& title, std::vector<TransferItem>& items,
+                      QStringList& skipped)
+{
+    std::vector<TransferItem> kept;
+    std::optional<bool> overwrite_all;
+    for (TransferItem& item : items) {
+        if (item.target == item.source || item.target.starts_with(item.source + "/")) {
+            skipped << QObject::tr("%1 cannot go into itself")
+                           .arg(QString::fromStdString(item.source));
+            continue;
+        }
+        const QFileInfo target(QString::fromStdString(item.target));
+        if (target.exists() || target.isSymLink()) {
+            bool overwrite = false;
+            if (overwrite_all) {
+                overwrite = *overwrite_all;
+            } else {
+                QMessageBox box(QMessageBox::Question, title,
+                                QObject::tr("%1 already exists.").arg(target.filePath()),
+                                QMessageBox::NoButton, parent);
+                box.setInformativeText(target.isDir()
+                                           ? QObject::tr("Overwrite merges the folders, "
+                                                         "replacing the files of the same "
+                                                         "names.")
+                                           : QObject::tr("Overwrite replaces it."));
+                QPushButton* replace =
+                    box.addButton(QObject::tr("&Overwrite"), QMessageBox::AcceptRole);
+                QPushButton* skip = box.addButton(QObject::tr("&Skip"), QMessageBox::RejectRole);
+                box.addButton(QMessageBox::Cancel);
+                auto* all = new QCheckBox(QObject::tr("Do the same for the other conflicts"), &box);
+                box.setCheckBox(all);
+                box.exec();
+                if (box.clickedButton() != replace && box.clickedButton() != skip)
+                    return false;
+                overwrite = box.clickedButton() == replace;
+                if (all->isChecked())
+                    overwrite_all = overwrite;
+            }
+            if (!overwrite) {
+                skipped << QObject::tr("%1 exists, skipped").arg(target.filePath());
+                continue;
+            }
+            item.overwrite = true;
+        }
+        kept.push_back(std::move(item));
+    }
+    items = std::move(kept);
+    return true;
+}
+
+void show_problems(QWidget* parent, const QString& title, const QStringList& problems)
+{
+    if (problems.isEmpty())
+        return;
+    QMessageBox box(QMessageBox::Warning, title, QObject::tr("Not everything was done."),
+                    QMessageBox::Ok, parent);
+    box.setInformativeText(problems.mid(0, 5).join(QLatin1Char('\n')));
+    box.setDetailedText(problems.join(QLatin1Char('\n')));
+    box.exec();
 }
 
 TransferResult run_transfer(QWidget* parent, TransferKind kind, const std::vector<TransferItem>& items)

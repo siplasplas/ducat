@@ -178,6 +178,18 @@ and their database when several are searched, and can be sorted like a
 directory; Enter or a double click shows the match in the main window. At
 most 200,000 matches are listed.
 
+The matches can be worked on as files, when they are on disk now. Click,
+Shift or Ctrl with a click, or Ctrl+A for all, selects them; then Copy (F5)
+and Move (F6) put them into one folder, made when missing, and Move to Trash
+(F8) moves them to the trash, e.g. all `cmake-build-*` folders found. A match
+inside another selected folder goes with that folder. Matches of the same
+name go into subfolders named after the folders holding them:
+`abc/a/name1` and `def/b/name1` become `DIR/a/name1` and `DIR/b/name1`, and
+when those names repeat too, `DIR/a_1/name1` and `DIR/a_2/name1`. Each
+database searched, and the shown one, is updated where it stores the folders
+concerned, and the search is run again. F4 edits a match, updating its
+database on saving.
+
 Both Find and Duplicates look in the trees checked under Look in: the stored
 trees of the shown database and of further databases, e.g. one of the home
 directory and one of removable drives, which Add Database… adds and Remove
