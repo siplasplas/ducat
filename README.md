@@ -290,6 +290,20 @@ the desktop. Plugins go to `lib/ducat/plugins`, the encoding detection data of
 the viewer to `share/ducat/cpg`, and a shared `libducat` to `lib`, where the
 installed programs find it. `--strip` makes the plugins much smaller. Remove the files listed in `build/install_manifest.txt` to uninstall.
 
+Install again after every build you want to use from the menu or from
+`ducat-gui` on the `PATH`: the installed files are copies, and the build tree
+does not change them (running `build/gui/ducat-gui` directly needs no install).
+
+The install also refreshes the icon cache (`gtk-update-icon-cache`) and the
+desktop file database (`update-desktop-database`) of the prefix, so the icon
+shows without logging out; this is skipped when `DESTDIR` is set, for packages.
+If the icon is still missing, restart the program, or run these by hand:
+
+```sh
+sudo gtk-update-icon-cache -f -t /usr/local/share/icons/hicolor
+sudo update-desktop-database /usr/local/share/applications
+```
+
 ## Tests
 
 Unit tests are built by default (`-DDUCAT_BUILD_TESTS=OFF` turns them off) and

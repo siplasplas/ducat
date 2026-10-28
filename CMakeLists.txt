@@ -71,6 +71,26 @@ if(DUCAT_BUILD_GUI AND Qt6_FOUND)
     install(FILES res/ducat.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
     install(FILES res/ducat.svg
             DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+    # Refresh the icon and desktop file caches, so that a running desktop
+    # (e.g. GNOME on Wayland, whose shell cannot be restarted without logging
+    # out) shows the icon at once. Skipped for packaging (DESTDIR) and when
+    # the tools are missing.
+    install(CODE "
+        if(NOT \"\$ENV{DESTDIR}\")
+            set(data \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}\")
+            find_program(gtk_update_icon_cache gtk-update-icon-cache)
+            find_program(update_desktop_database update-desktop-database)
+            if(gtk_update_icon_cache)
+                message(STATUS \"Updating the icon cache of \${data}/icons/hicolor\")
+                execute_process(COMMAND \"\${gtk_update_icon_cache}\" -f -t
+                                \"\${data}/icons/hicolor\" OUTPUT_QUIET ERROR_QUIET)
+            endif()
+            if(update_desktop_database)
+                execute_process(COMMAND \"\${update_desktop_database}\"
+                                \"\${data}/applications\" OUTPUT_QUIET ERROR_QUIET)
+            endif()
+        endif()
+    ")
 endif()
 
 if(DUCAT_BUILD_TESTS)
