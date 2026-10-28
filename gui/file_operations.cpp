@@ -323,7 +323,10 @@ QString ask_destination(QWidget* parent, const QString& title, const QString& la
         if (!chosen.isEmpty())
             edit->setText(chosen);
     });
+    // Enter accepts, also in the path field; Browse only when clicked.
+    browse->setAutoDefault(false);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setDefault(true);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
 
@@ -370,6 +373,10 @@ bool settle_conflicts(QWidget* parent, const QString& title, std::vector<Transfe
                     box.addButton(QObject::tr("&Overwrite"), QMessageBox::AcceptRole);
                 QPushButton* skip = box.addButton(QObject::tr("&Skip"), QMessageBox::RejectRole);
                 box.addButton(QMessageBox::Cancel);
+                // Enter overwrites, as asked for; Escape cancels the whole work.
+                box.setDefaultButton(replace);
+                box.setEscapeButton(QMessageBox::Cancel);
+                QTimer::singleShot(0, replace, [replace] { replace->setFocus(); });
                 auto* all = new QCheckBox(QObject::tr("Do the same for the other conflicts"), &box);
                 box.setCheckBox(all);
                 box.exec();
@@ -389,6 +396,19 @@ bool settle_conflicts(QWidget* parent, const QString& title, std::vector<Transfe
     }
     items = std::move(kept);
     return true;
+}
+
+bool confirm(QWidget* parent, const QString& title, const QString& text, bool warning)
+{
+    QMessageBox box(warning ? QMessageBox::Warning : QMessageBox::Question, title, text,
+                    QMessageBox::Yes | QMessageBox::No, parent);
+    QAbstractButton* yes = box.button(QMessageBox::Yes);
+    box.setDefaultButton(QMessageBox::Yes);
+    box.setEscapeButton(QMessageBox::No);
+    // The focused button takes Enter, so Yes gets the focus too.
+    QTimer::singleShot(0, yes, [yes] { yes->setFocus(); });
+    box.exec();
+    return box.clickedButton() == yes;
 }
 
 void show_problems(QWidget* parent, const QString& title, const QStringList& problems)

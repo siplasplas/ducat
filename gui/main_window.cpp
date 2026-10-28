@@ -119,9 +119,9 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     new_folder->setToolTip(tr("Create a folder in the shown one, on disk and in the database (F7)"));
     QAction* trash = file_menu->addAction(icon("user-trash", QStyle::SP_TrashIcon),
                                           tr("Move to &Trash…"), this, &MainWindow::move_to_trash);
-    trash->setShortcut(Qt::Key_F8);
+    trash->setShortcuts({QKeySequence(Qt::Key_F8), QKeySequence(Qt::Key_Delete)});
     trash->setToolTip(tr("Move the selected entries to the trash and remove them from the "
-                         "database (F8)"));
+                         "database (F8, Delete)"));
 
     strip_action_ = file_menu->addAction(tr("Remove Archive &Contents Here…"), this,
                                          &MainWindow::strip_archives);
@@ -533,7 +533,7 @@ void MainWindow::move_to_trash()
                        .arg(to_qstring(current_))
                    + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'));
     }
-    if (QMessageBox::question(this, tr("Move to Trash"), question) != QMessageBox::Yes)
+    if (!confirm(this, tr("Move to Trash"), question))
         return;
 
     // The entry after the last selected one gets the selection.
@@ -689,12 +689,10 @@ void MainWindow::strip_archives()
         show_error(tr("Go to a folder outside the archive first"));
         return;
     }
-    const auto answer = QMessageBox::question(
-        this, tr("Remove Archive Contents"),
-        tr("Remove the stored contents of the archives below %1?\n\nThe archives stay listed "
-           "as files; a scan that reads archives stores their contents again.")
-            .arg(to_qstring(current_)));
-    if (answer != QMessageBox::Yes)
+    if (!confirm(this, tr("Remove Archive Contents"),
+                 tr("Remove the stored contents of the archives below %1?\n\nThe archives stay "
+                    "listed as files; a scan that reads archives stores their contents again.")
+                     .arg(to_qstring(current_))))
         return;
 
     std::size_t count = 0;

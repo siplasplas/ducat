@@ -1,5 +1,6 @@
 #include "duplicates_dialog.hpp"
 
+#include "file_operations.hpp"
 #include "list_views.hpp"
 #include "main_window.hpp"
 #include "scope_selector.hpp"
@@ -430,12 +431,11 @@ void DuplicatesDialog::operate(EntryOperation operation)
             return;
         }
         if (!both.empty() && operation != EntryOperation::copy
-            && QMessageBox::warning(this, tr("Duplicates"),
-                                    tr("Both folders of %n pairs are selected, so neither copy "
-                                       "would stay in place. Go on?",
-                                       nullptr, static_cast<int>(both.size())),
-                                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
-                   != QMessageBox::Yes)
+            && !confirm(this, tr("Duplicates"),
+                        tr("Both folders of %n pairs are selected, so neither copy would stay "
+                           "in place. Go on?",
+                           nullptr, static_cast<int>(both.size())),
+                        true))
             return;
     }
     if (entries.empty())
@@ -455,12 +455,11 @@ void DuplicatesDialog::operate(EntryOperation operation)
             whole += copies > 0 && chosen == copies;
         }
         if (whole > 0
-            && QMessageBox::warning(this, tr("Move to Trash"),
-                                    tr("All copies of %n files are selected, so no copy of them "
-                                       "would be left. Go on?",
-                                       nullptr, whole),
-                                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
-                   != QMessageBox::Yes)
+            && !confirm(this, tr("Move to Trash"),
+                        tr("All copies of %n files are selected, so no copy of them would be "
+                           "left. Go on?",
+                           nullptr, whole),
+                        true))
             return;
     }
 

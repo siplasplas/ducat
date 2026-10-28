@@ -240,11 +240,15 @@ move across file systems copies and then removes only what was copied whole.
 The database is updated for the sources of a move and for the targets, where
 their folders are stored: moving from a scanned USB drive to an unscanned
 home folder removes the entries from the drive's tree only. New Folder (F7)
-creates a folder in the shown one, and Move to Trash (F8) moves the selected
-entries to the desktop's trash, never deleting them for good. All need the shown folder on disk, that is its drive mounted, and work
-neither inside archives nor during a scan. The library function
-`ducat::update_entry` brings one changed path up to date in a database, when
-the folder holding it is stored there.
+creates a folder in the shown one, and Move to Trash (F8 or Delete, also
+among search matches and duplicates) moves the selected entries to the
+desktop's trash, never deleting them for good. All need the shown folder on
+disk, that is its drive mounted, and work neither inside archives nor during
+a scan. The library function `ducat::update_entry` brings one changed path
+up to date in a database, when the folder holding it is stored there.
+
+In the questions these operations ask, Enter answers yes, or OK, and Escape
+cancels; when a target exists, Enter overwrites it.
 
 Duplicates… (Ctrl+Shift+D) finds probable duplicates among the stored entries
 as `ducat dups` does, also across drives and databases: files with the same

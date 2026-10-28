@@ -37,6 +37,10 @@ QString ask_destination(QWidget* parent, const QString& title, const QString& la
 bool settle_conflicts(QWidget* parent, const QString& title, std::vector<TransferItem>& items,
                       QStringList& skipped);
 
+// Asks a yes-or-no question: Enter answers Yes, Escape No. `warning` shows
+// it as a warning rather than a question. Returns whether the answer is Yes.
+bool confirm(QWidget* parent, const QString& title, const QString& text, bool warning = false);
+
 // Shows the problems of a file operation, if any, in a message box.
 void show_problems(QWidget* parent, const QString& title, const QStringList& problems);
 

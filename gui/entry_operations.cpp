@@ -40,28 +40,30 @@ QHBoxLayout* operation_buttons(QWidget* parent, const std::vector<QWidget*>& vie
 {
     auto* row = new QHBoxLayout;
     row->addWidget(new QLabel(label, parent));
-    const auto add = [&](const QString& text, Qt::Key key, EntryOperation operation,
-                         const QString& tip) {
+    const auto add = [&](const QString& text, const std::vector<Qt::Key>& keys,
+                         EntryOperation operation, const QString& tip) {
         auto* button = new QPushButton(text, parent);
         button->setToolTip(tip);
         button->setAutoDefault(false);
         QObject::connect(button, &QPushButton::clicked, parent, [run, operation] { run(operation); });
         for (QWidget* view : views) {
-            auto* shortcut = new QShortcut(key, view);
-            shortcut->setContext(Qt::WidgetWithChildrenShortcut);
-            QObject::connect(shortcut, &QShortcut::activated, parent,
-                             [run, operation] { run(operation); });
+            for (const Qt::Key key : keys) {
+                auto* shortcut = new QShortcut(key, view);
+                shortcut->setContext(Qt::WidgetWithChildrenShortcut);
+                QObject::connect(shortcut, &QShortcut::activated, parent,
+                                 [run, operation] { run(operation); });
+            }
         }
         row->addWidget(button);
     };
-    add(QObject::tr("Copy… (F5)"), Qt::Key_F5, EntryOperation::copy,
+    add(QObject::tr("Copy… (F5)"), {Qt::Key_F5}, EntryOperation::copy,
         QObject::tr("Copy the selected entries into a folder; entries of the same name go into "
                     "subfolders named after their folders"));
-    add(QObject::tr("Move… (F6)"), Qt::Key_F6, EntryOperation::move,
+    add(QObject::tr("Move… (F6)"), {Qt::Key_F6}, EntryOperation::move,
         QObject::tr("Move the selected entries into a folder; entries of the same name go into "
                     "subfolders named after their folders"));
-    add(QObject::tr("Move to Trash… (F8)"), Qt::Key_F8, EntryOperation::trash,
-        QObject::tr("Move the selected entries to the trash"));
+    add(QObject::tr("Move to Trash… (F8, Del)"), {Qt::Key_F8, Qt::Key_Delete},
+        EntryOperation::trash, QObject::tr("Move the selected entries to the trash"));
     row->addStretch();
     return row;
 }
@@ -132,11 +134,10 @@ EntryOperationOutcome operate_on_entries(QWidget* parent, MainWindow& window,
             shown << text(sources[i]);
         if (sources.size() > 10)
             shown << QObject::tr("… and %n more", nullptr, static_cast<int>(sources.size() - 10));
-        const auto answer = QMessageBox::question(
-            parent, title,
-            QObject::tr("Move %n entries to the trash?", nullptr, static_cast<int>(sources.size()))
-                + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n')) + count_note);
-        if (answer != QMessageBox::Yes)
+        if (!confirm(parent, title,
+                     QObject::tr("Move %n entries to the trash?", nullptr,
+                                 static_cast<int>(sources.size()))
+                         + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n')) + count_note))
             return outcome;
         QApplication::setOverrideCursor(Qt::WaitCursor);
         for (const std::string& path : sources) {
