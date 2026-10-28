@@ -16,6 +16,8 @@ ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
 ducat find [-d FILE] [PATH] [CRITERIA] [--sort KEY] [--limit N]
+ducat dups [-d FILE] [PATH] [--time] [--min-size SIZE] [--limit N]
+ducat dups --dirs [-d FILE] [PATH] [--threshold PERCENT] [--names] [--min-files N] [--limit N]
 ```
 
 `scan` scans the tree at `PATH`, stores it in the database and prints its disk
@@ -79,6 +81,24 @@ ducat find --min-files 100000 --sort files
 ducat find ~ -e iso,img --min-size 1G
 ducat find /var/log -n '*.log' --older 1y
 ```
+
+`dups` lists probable duplicates among the stored entries, found by names and
+sizes only, without reading the files:
+
+- Files with the same name and logical size, with `--time` also the same
+  modification time, in groups sorted by the space taken by the copies beyond
+  the first. Files smaller than `--min-size` (1 byte) are left out, and so are
+  hard links counted elsewhere, which take no space of their own.
+- With `--dirs`, pairs of directories sharing at least `--threshold` percent
+  (80) of the files below them, at any depth, counted against the directory
+  with more files. Files are compared by name and size, or with `--names` by
+  name only, so that they may differ in size. Directories with fewer than
+  `--min-files` files (5) are left out, a directory is never paired with one
+  inside it, and only the topmost pairs are listed: `A/x` with `B/x` is left
+  out when `A` and `B` pair. Pairs are sorted by the disk usage of the smaller
+  directory.
+
+On `/usr` (870,000 entries) either takes about half a second.
 
 ### Databases
 
