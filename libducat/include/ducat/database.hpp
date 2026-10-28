@@ -3,6 +3,7 @@
 #include "ducat/record.hpp"
 #include "ducat/scanner.hpp"
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -62,6 +63,17 @@ public:
     // below it, without touching the directories above.
     void remove_tree(std::string_view path);
 
+    // Stores the contents of the stored file at `path`, e.g. the listing of
+    // an archive, under its path as if it were a directory: `contents` is
+    // that directory, its name ignored. The file's entry is marked
+    // (Node::has_contents); the totals of the directories above stay, as the
+    // contents take no space of their own. Replaces contents stored before.
+    // Throws DatabaseError when the file is not stored.
+    void store_contents(std::string_view path, const Node& contents);
+
+    // Removes the stored contents of the file at `path` and the mark.
+    void remove_contents(std::string_view path);
+
     // Reads the main record of a directory: its data, entry and segment
     // counts and the first page of entries. Returns nullopt when the
     // directory is not in the database.
@@ -102,6 +114,8 @@ private:
     void replace_entry(const std::string& path, const Node* entry, const Node* parent_own);
     void add_to_ancestors(std::string path, const Share& added, const Share& removed,
                           const Node* own);
+    bool modify_entry(const std::string& dir, const std::string& name,
+                      const std::function<bool(Node&)>& modify);
     void remove_prefix(std::string_view prefix);
     void set(std::string_view key, std::string_view value);
 

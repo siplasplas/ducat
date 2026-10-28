@@ -1,11 +1,13 @@
 #include "directory_model.hpp"
 
+#include "ducat/archive.hpp"
 #include "ducat/format.hpp"
 
 #include <QApplication>
 #include <QDateTime>
 #include <QFileInfo>
 #include <QFont>
+#include <QIcon>
 #include <QLocale>
 #include <QStyle>
 
@@ -122,6 +124,10 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
         if (counted_elsewhere(entry) && column != Folder)
             return tr("A hard link whose data is counted once, at another link, so it adds "
                       "nothing to the folder totals");
+        if (column == Name && entry.has_contents)
+            return tr("Archive with its contents stored: Enter opens them");
+        if (column == Name && !entry.is_dir && ducat::is_archive_name(entry.name))
+            return tr("Archive; its contents are not stored");
         if (column == Usage)
             return tr("Share of the disk usage of this directory");
         if (column == Disk || column == Size) {
@@ -132,9 +138,16 @@ QVariant DirectoryModel::data(const QModelIndex& index, int role) const
             return QString::fromStdString(folder(index.row()));
         break;
     case Qt::DecorationRole:
-        if (column == Name)
+        if (column == Name) {
+            if (!entry.is_dir && ducat::is_archive_name(entry.name)) {
+                static const QIcon archive = QIcon::fromTheme(
+                    QStringLiteral("package-x-generic"),
+                    QApplication::style()->standardIcon(QStyle::SP_DriveCDIcon));
+                return archive;
+            }
             return QApplication::style()->standardIcon(entry.is_dir ? QStyle::SP_DirIcon
                                                                     : QStyle::SP_FileIcon);
+        }
         break;
     case Qt::TextAlignmentRole:
         if (column != Name && column != Folder && column != Database)

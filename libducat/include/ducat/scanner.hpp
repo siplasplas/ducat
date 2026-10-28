@@ -27,6 +27,10 @@ struct Node {
     std::uint64_t files = 0;       // non-directory descendants
     std::uint64_t dirs = 0;        // directory descendants
 
+    // A file, such as an archive, whose contents are stored in the database
+    // under its path, like a directory; they are not in the totals above.
+    bool has_contents = false;
+
     std::vector<Node> children;    // only for directories
 };
 

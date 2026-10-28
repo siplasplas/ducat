@@ -41,6 +41,11 @@ struct SearchQuery {
     // A directory's time is its own, not that of its contents.
     std::int64_t modified_after = std::numeric_limits<std::int64_t>::min();
     std::int64_t modified_before = std::numeric_limits<std::int64_t>::max();
+
+    // Also look in the stored contents of files such as archives
+    // (Node::has_contents); their totals are not known in advance, so these
+    // contents are always read.
+    bool in_contents = false;
 };
 
 // The size the query compares for an entry.

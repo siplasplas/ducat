@@ -46,6 +46,7 @@ private:
     QLineEdit* newer_;
     QLineEdit* older_;
     ScopeSelector* scope_;
+    QCheckBox* in_contents_;
     QLabel* status_;
     DirectoryModel* model_;
     QTreeView* view_;

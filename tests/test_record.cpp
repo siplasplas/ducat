@@ -50,7 +50,13 @@ Node make_tree(std::size_t count)
         case 0: dir.children.push_back(make_file(name, i, i * 512, 1700000000 + i)); break;
         case 1: dir.children.push_back(make_file(name + "-dup", 70000, 73728, 0, true)); break;
         case 2: dir.children.push_back(make_dir(name, ~0ULL, max_disk, ~0ULL, ~0ULL)); break;
-        case 3: dir.children.push_back(make_file(name + "\n\xC5\x82\x01", 0, 0, -1)); break;
+        case 3: {
+            // Every other one an archive with stored contents.
+            Node file = make_file(name + "\n\xC5\x82\x01", 0, 0, -1);
+            file.has_contents = i % 2 == 0;
+            dir.children.push_back(file);
+            break;
+        }
         default: dir.children.push_back(make_dir(name + ".d", 0, 0, 0, 0)); break;
         }
     }
@@ -62,7 +68,7 @@ bool same_fields(const Node& a, const Node& b)
 {
     return a.name == b.name && a.size == b.size && a.disk == b.disk && a.modified == b.modified
         && a.is_dir == b.is_dir && a.total_size == b.total_size && a.total_disk == b.total_disk
-        && a.files == b.files && a.dirs == b.dirs;
+        && a.files == b.files && a.dirs == b.dirs && a.has_contents == b.has_contents;
 }
 
 void test_round_trip(std::size_t count)
@@ -126,10 +132,15 @@ void test_malformed()
         CHECK(!record::decode_segment(std::string_view(segment).substr(0, length), entries));
     CHECK(!record::decode_segment(segment + '\0', entries));
 
-    // One entry with unknown flags: count 1, flags 0x04, empty name, 0, 0, 0.
+    // One entry: count 1, flags, empty name, 0, 0, 0. A file may have stored
+    // contents (0x04); a directory may not (0x05), nor be a duplicate (0x03);
+    // 0x08 is unknown.
     entries.clear();
     CHECK(record::decode_segment(std::string("\x01\x00\x00\x00\x00\x00", 6), entries));
-    CHECK(!record::decode_segment(std::string("\x01\x04\x00\x00\x00\x00", 6), entries));
+    CHECK(record::decode_segment(std::string("\x01\x04\x00\x00\x00\x00", 6), entries));
+    CHECK(entries.size() == 2 && !entries[0].has_contents && entries[1].has_contents);
+    CHECK(!record::decode_segment(std::string("\x01\x08\x00\x00\x00\x00", 6), entries));
+    CHECK(!record::decode_segment(std::string("\x01\x05\x00\x00\x00\x00", 6), entries));
     CHECK(!record::decode_segment(std::string("\x01\x03\x00\x00\x00\x00", 6), entries));
 }
 

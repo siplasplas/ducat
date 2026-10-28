@@ -27,7 +27,9 @@ void append_entry(std::string& out, const Node& node)
 {
     const bool duplicate = !node.is_dir
         && (node.total_size != node.size || node.total_disk != node.disk);
-    out += static_cast<char>((node.is_dir ? flag_dir : 0) | (duplicate ? flag_duplicate : 0));
+    const bool contents = !node.is_dir && node.has_contents;
+    out += static_cast<char>((node.is_dir ? flag_dir : 0) | (duplicate ? flag_duplicate : 0)
+                             | (contents ? flag_contents : 0));
     append_number(out, node.name.size());
     out += node.name;
     append_number(out, node.size);
@@ -132,13 +134,14 @@ bool read_entry(Reader& in, Node& node)
     std::uint8_t flags;
     std::uint64_t name_length;
     std::string_view name;
-    if (!in.byte(flags) || (flags & ~(flag_dir | flag_duplicate)) != 0
-        || ((flags & flag_dir) && (flags & flag_duplicate)))
+    if (!in.byte(flags) || (flags & ~(flag_dir | flag_duplicate | flag_contents)) != 0
+        || ((flags & flag_dir) && (flags & (flag_duplicate | flag_contents))))
         return false;
     if (!in.number(name_length) || !in.bytes(name_length, name))
         return false;
     node.name = name;
     node.is_dir = (flags & flag_dir) != 0;
+    node.has_contents = (flags & flag_contents) != 0;
     if (!in.number(node.size) || !in.disk(node.disk) || !in.time(node.modified))
         return false;
     if (node.is_dir)

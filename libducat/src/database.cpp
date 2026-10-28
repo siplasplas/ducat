@@ -22,7 +22,10 @@ constexpr std::string_view tkrzw_magic = "TkrzwHDB\n";
 // The record naming the format of the database. Its key does not start with
 // '/', so it never mixes with directory keys, and sorts before them.
 constexpr std::string_view format_key = "\x01" "format";
-constexpr std::string_view format_value = "ducat 1";
+constexpr std::string_view format_value = "ducat 2";
+// Format 2 adds stored contents of files (record::flag_contents) to format 1,
+// which it can read; writing to such a database marks it as format 2.
+constexpr std::string_view older_format_value = "ducat 1";
 
 [[noreturn]] void fail(const std::string& file, std::string_view what, const tkrzw::Status& status)
 {
@@ -104,7 +107,7 @@ Database::Database(const std::string& file, Mode mode)
     // A ducat database carries its format. An existing file is checked
     // read-only first, as opening it for writing alone changes its header.
     const bool writable = mode == Mode::write;
-    bool claim = !exists; // a new database gets the format record
+    bool claim = !exists; // a new or older database gets the format record
     if (exists) {
         tkrzw::Status status = dbm_->OpenAdvanced(file, false, tkrzw::File::OPEN_NO_CREATE);
         if (!status.IsOK())
@@ -115,6 +118,8 @@ Database::Database(const std::string& file, Mode mode)
         dbm_->Close();
         if (status == tkrzw::Status::NOT_FOUND_ERROR && empty && writable)
             claim = true; // e.g. a database whose creation was cut short
+        else if (format == older_format_value)
+            claim = writable;
         else if (format != format_value)
             throw DatabaseError(file_
                                 + (format.starts_with("ducat ")
@@ -247,6 +252,73 @@ void Database::replace_entry(const std::string& path, const Node* entry, const N
 // entries for the directory below, up to the first one not stored; `own`,
 // when given, also replaces the own data in the entry for `path` itself.
 // Only the main record and the segment holding the entry are rewritten.
+void Database::store_contents(std::string_view path, const Node& contents)
+{
+    const std::string file = normalize_path(path);
+    if (file == "/")
+        throw DatabaseError("/ is not a file");
+    const auto [dir, name] = split_path(file);
+    // Checked before writing anything: the file must be stored in its directory.
+    bool stored = false;
+    modify_entry(dir, name, [&](Node& entry) {
+        stored = !entry.is_dir;
+        return false;
+    });
+    if (!stored)
+        throw DatabaseError(file + " is not a stored file");
+
+    remove_tree(file);
+    Node root = contents;
+    root.is_dir = true;
+    store_directory(root, file);
+    modify_entry(dir, name, [](Node& entry) {
+        entry.has_contents = true;
+        return true;
+    });
+}
+
+void Database::remove_contents(std::string_view path)
+{
+    const std::string file = normalize_path(path);
+    if (file == "/")
+        return;
+    remove_tree(file);
+    const auto [dir, name] = split_path(file);
+    modify_entry(dir, name, [](Node& entry) {
+        const bool marked = !entry.is_dir && entry.has_contents;
+        entry.has_contents = false;
+        return marked;
+    });
+}
+
+// Applies `modify` to the entry `name` of the stored directory `dir` and,
+// when it returns true, writes the record holding the entry back: the main
+// record or one segment. The entry must keep its name. Returns false when
+// there is no such entry.
+bool Database::modify_entry(const std::string& dir, const std::string& name,
+                            const std::function<bool(Node&)>& modify)
+{
+    std::optional<record::DirectoryRecord> record = read_directory(dir);
+    if (!record)
+        return false;
+    if (Node* entry = find_entry(record->dir.children, name)) {
+        if (modify(*entry))
+            set(record::directory_key(dir), record::encode_main(*record));
+        return true;
+    }
+    for (std::uint64_t i = 1; i <= record->segment_count; ++i) {
+        std::vector<Node> segment;
+        if (!read_segment(dir, i, segment))
+            throw DatabaseError(file_ + ": missing segment " + std::to_string(i) + " of " + dir);
+        if (Node* entry = find_entry(segment, name)) {
+            if (modify(*entry))
+                set(record::segment_key(dir, i), record::encode_segment(segment));
+            return true;
+        }
+    }
+    return false;
+}
+
 void Database::add_to_ancestors(std::string path, const Share& added, const Share& removed,
                                 const Node* own)
 {

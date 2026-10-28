@@ -82,7 +82,9 @@ SearchDialog::SearchDialog(MainWindow& window)
       min_files_(line_edit(this, tr("number"))), max_files_(line_edit(this, tr("number"))),
       newer_(line_edit(this, tr("e.g. 30d or 2024-01-31"))),
       older_(line_edit(this, tr("e.g. 1y or 2024-01-31 18:00"))),
-      scope_(new ScopeSelector(window, this)), status_(new QLabel(this)),
+      scope_(new ScopeSelector(window, this)),
+      in_contents_(new QCheckBox(tr("Also inside stored archives"), this)),
+      status_(new QLabel(this)),
       model_(new DirectoryModel(this)), view_(new QTreeView(this))
 {
     setWindowTitle(tr("Find – ducat"));
@@ -102,6 +104,9 @@ SearchDialog::SearchDialog(MainWindow& window)
     form->addRow(tr("Files inside from:"), pair(this, min_files_, tr("to"), max_files_));
     form->addRow(tr("Modified after:"), pair(this, newer_, tr("before"), older_));
     form->addRow(tr("Look in:"), scope_);
+    in_contents_->setToolTip(tr("Search also the contents of archives scanned into the "
+                                "database"));
+    form->addRow(QString(), in_contents_);
 
     auto* buttons = new QDialogButtonBox(this);
     QPushButton* find = buttons->addButton(tr("Find"), QDialogButtonBox::AcceptRole);
@@ -171,6 +176,7 @@ void SearchDialog::run_search()
             query.extensions.push_back(extension.toStdString());
     }
     query.apparent_size = apparent_->isChecked();
+    query.in_contents = in_contents_->isChecked();
 
     // Each filled field must parse; an empty one sets no limit.
     QString invalid;

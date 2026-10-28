@@ -82,6 +82,8 @@ public:
                 return false;
             if (entry.is_dir && may_contain_match(query_, entry) && !visit(entry_path))
                 return false;
+            if (entry.has_contents && query_.in_contents && !visit(entry_path))
+                return false;
         }
         return true;
     }

@@ -1,6 +1,7 @@
 configure_file(src/config.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/config.hpp" @ONLY)
 
 add_library(libducat
+    src/archive.cpp
     src/database.cpp
     src/duplicates.cpp
     src/format.cpp

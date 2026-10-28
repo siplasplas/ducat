@@ -412,6 +412,107 @@ void test_database_path_from_argument()
     CHECK_EQ(path("relative.ducat"), std::string("relative.ducat"));
 }
 
+// Reads the format record of a database file directly.
+std::string format_of(const fs::path& file)
+{
+    tkrzw::TreeDBM dbm;
+    dbm.Open(file.string(), false);
+    std::string format;
+    dbm.Get(std::string("\x01" "format"), &format);
+    dbm.Close();
+    return format;
+}
+
+void test_older_format()
+{
+    using Mode = ducat::Database::Mode;
+    TempDir temp;
+    const fs::path file = temp.path() / "old.ducat";
+    {
+        tkrzw::TreeDBM dbm;
+        dbm.Open(file.string(), true);
+        dbm.Set(std::string("\x01" "format"), "ducat 1");
+        dbm.Close();
+    }
+    // Format 1 is read as it is, and marked as format 2 once opened for writing.
+    CHECK(open_error(file, Mode::read).empty());
+    CHECK_EQ(format_of(file), std::string("ducat 1"));
+    CHECK(open_error(file, Mode::write).empty());
+    CHECK_EQ(format_of(file), std::string("ducat 2"));
+
+    const fs::path newer = temp.path() / "newer.ducat";
+    {
+        tkrzw::TreeDBM dbm;
+        dbm.Open(newer.string(), true);
+        dbm.Set(std::string("\x01" "format"), "ducat 3");
+        dbm.Close();
+    }
+    CHECK(open_error(newer, Mode::read).find("another version of ducat") != std::string::npos);
+}
+
+void test_contents()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root); // big/ with 70 files, so its last entries are in a segment
+    write_file(root / "a.zip", 3000);
+    write_file(root / "big" / "z.zip", 4000);
+    // What the archives hold, scanned from a directory here.
+    const fs::path inside = temp.path() / "inside";
+    fs::create_directories(inside / "docs");
+    write_file(inside / "top.bin", 1000);
+    write_file(inside / "docs" / "readme.txt", 500);
+    const ducat::ScanResult contents = ducat::scan_tree(inside.string());
+
+    ducat::Database db((temp.path() / "test.ducat").string(), ducat::Database::Mode::write);
+    db.store(ducat::scan_tree(root.string()));
+    const std::uint64_t total = db.read_directory(root.string())->dir.total_disk;
+
+    const auto entry = [&](const fs::path& file) {
+        const std::optional<ducat::Node> dir = db.load_directory(file.parent_path().string());
+        const ducat::Node* found = dir ? find_child(*dir, file.filename().string()) : nullptr;
+        return found ? *found : ducat::Node();
+    };
+
+    for (const fs::path& archive : {root / "a.zip", root / "big" / "z.zip"}) {
+        db.store_contents(archive.string(), contents.root);
+        CHECK(entry(archive).has_contents);
+        ducat::Node expected = contents.root;
+        check_stored(db, expected, archive.string());
+    }
+    // The contents take no space of their own.
+    const std::uint64_t total_after = db.read_directory(root.string())->dir.total_disk;
+    CHECK_EQ(total_after, total);
+    CHECK(db.roots() == std::vector<std::string>{root.string()});
+
+    // Stored again with less, the rest goes.
+    ducat::ScanResult less = ducat::scan_tree((inside / "docs").string());
+    db.store_contents((root / "a.zip").string(), less.root);
+    CHECK(!db.read_directory((root / "a.zip" / "docs").string()));
+    CHECK(db.load_directory((root / "a.zip").string())->children.size() == 1);
+
+    db.remove_contents((root / "big" / "z.zip").string());
+    CHECK(!entry(root / "big" / "z.zip").has_contents);
+    CHECK(!db.read_directory((root / "big" / "z.zip").string()));
+
+    // Only stored files have contents.
+    const auto refused = [&](const fs::path& path) {
+        try {
+            db.store_contents(path.string(), contents.root);
+        } catch (const ducat::DatabaseError&) {
+            return true;
+        }
+        return false;
+    };
+    CHECK(refused(root / "big"));
+    CHECK(refused(root / "missing.zip"));
+
+    // A new scan of the tree replaces its records, the contents too.
+    db.store(ducat::scan_tree(root.string()));
+    CHECK(!entry(root / "a.zip").has_contents);
+    CHECK(!db.read_directory((root / "a.zip").string()));
+}
+
 void test_open_errors()
 {
     TempDir temp;
@@ -436,6 +537,8 @@ int main()
     test_compact();
     test_format();
     test_database_path_from_argument();
+    test_older_format();
+    test_contents();
     test_open_errors();
     return check::result();
 }

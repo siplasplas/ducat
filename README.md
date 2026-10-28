@@ -113,6 +113,19 @@ ducat dups -d ~/home.ducat -d ~/drives.ducat          # also across the two
 ducat dups --dirs -d ~/drives.ducat /run/media/$USER  # only among the drives
 ```
 
+### Archives
+
+Files whose names show an archive (zip, 7z, rar, tar and compressed tar, cpio,
+iso, cab, deb, rpm) are marked as such. A database can hold the contents of an
+archive under its path, like a folder: `…/photos.zip/2019/img.jpg`. These
+contents take no space of their own, so they are not in the totals of the
+folders above. Find looks into them only with Also inside stored archives, and
+in the GUI Enter on such an archive opens them. A new scan of the folder
+holding the archive replaces its records, the stored contents too. Reading
+archives to store their contents is coming next; the database format "ducat 2"
+for this reads older databases and marks them as format 2 when they are
+written.
+
 ### Databases
 
 The default database is `~/.local/share/siplasplas/ducat/drives.ducat` (under

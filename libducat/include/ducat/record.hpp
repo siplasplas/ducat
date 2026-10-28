@@ -18,14 +18,16 @@
 //                 segment_count   extra segments
 //                 inline_count, then inline_count entries
 //   segment:      count, then count entries
-//   entry:        flags byte (flag_dir, flag_duplicate)
+//   entry:        flags byte (flag_dir, flag_duplicate, flag_contents)
 //                 name length, name bytes
 //                 size, disk, modified
 //                 directories only: total_size, total_disk, files, dirs
 //
 // Entries are sorted by name (byte order). For a non-directory entry the
 // totals are its own sizes, or zero for a hard link counted elsewhere
-// (flag_duplicate).
+// (flag_duplicate). flag_contents marks a file, such as an archive, whose
+// contents are stored under its path as if it were a directory (from the
+// database format "ducat 2" on).
 
 #include "ducat/scanner.hpp"
 
@@ -42,6 +44,7 @@ inline constexpr std::size_t entries_per_segment = 32;
 
 inline constexpr std::uint8_t flag_dir = 0x01;
 inline constexpr std::uint8_t flag_duplicate = 0x02;
+inline constexpr std::uint8_t flag_contents = 0x04;
 
 struct EncodedDirectory {
     std::string main;                  // stored under directory_key(path)

@@ -109,6 +109,8 @@ private:
 
     void go_up();
     void open_entry(const QModelIndex& index);
+    // Whether `path` lies in the stored contents of an archive, not on disk.
+    bool inside_contents(const std::string& path);
     void open_typed_path();
     void choose_and_scan();
     void choose_database();

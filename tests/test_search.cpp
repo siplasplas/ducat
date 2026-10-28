@@ -1,5 +1,6 @@
 #include "check.hpp"
 
+#include "ducat/archive.hpp"
 #include "ducat/database.hpp"
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
@@ -274,6 +275,39 @@ void test_scopes()
     CHECK_EQ(found.size(), 60u);
 }
 
+// Stored contents of an archive are searched only when asked.
+void test_contents()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    make_tree(root);
+    write_file(root / "photos" / "album.zip", 9000);
+    const fs::path inside = temp.path() / "inside";
+    fs::create_directories(inside / "deep");
+    write_file(inside / "deep" / "img9.jpg", 800);
+
+    ducat::Database db((temp.path() / "test.ducat").string(), ducat::Database::Mode::write);
+    db.store(ducat::scan_tree(root.string()));
+    db.store_contents((root / "photos" / "album.zip").string(), ducat::scan_tree(inside.string()).root);
+
+    ducat::SearchQuery query;
+    query.name_pattern = "img*";
+    CHECK(find(db, query, root) == (Paths{"photos/img1.JPG", "photos/img2.jpg"}));
+    query.in_contents = true;
+    CHECK(find(db, query, root)
+          == (Paths{"photos/album.zip/deep/img9.jpg", "photos/img1.JPG", "photos/img2.jpg"}));
+}
+
+void test_archive_names()
+{
+    for (const char* name : {"a.zip", "B.ZIP", "x.7z", "x.rar", "x.tar", "x.tar.gz", "x.TGZ",
+                             "x.tar.xz", "x.tar.zst", "x.iso", "x.deb", "x.rpm", "x.cpio"})
+        CHECK(ducat::is_archive_name(name));
+    for (const char* name : {"zip", ".zip", "x.gz", "x.xz", "x.jar", "x.odt", "x.docx",
+                             "x.zipper", "x.txt", "tar"})
+        CHECK(!ducat::is_archive_name(name));
+}
+
 } // namespace
 
 int main()
@@ -282,5 +316,7 @@ int main()
     test_parse_time();
     test_search();
     test_scopes();
+    test_contents();
+    test_archive_names();
     return check::result();
 }

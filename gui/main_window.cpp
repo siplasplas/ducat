@@ -109,7 +109,15 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                               "stored ones, also across drives (Ctrl+Shift+D)"));
 
     refresh_action_ = toolbar->addAction(icon("view-refresh", QStyle::SP_BrowserReload),
-                                         tr("Refresh"), this, [this] { start_scan(current_); });
+                                         tr("Refresh"), this, [this] {
+                                             // Not on disk: a refresh would remove it.
+                                             if (inside_contents(current_))
+                                                 show_error(tr("The contents of an archive are "
+                                                               "refreshed with the folder "
+                                                               "holding the archive"));
+                                             else
+                                                 start_scan(current_);
+                                         });
     refresh_action_->setShortcut(QKeySequence::Refresh);
     refresh_action_->setToolTip(tr("Scan the shown directory again (F5)"));
 
@@ -643,8 +651,32 @@ void MainWindow::open_entry(const QModelIndex& index)
     if (!index.isValid() || current_.empty())
         return;
     const ducat::Node& entry = model_->entry(index.row());
-    if (entry.is_dir)
+    // An archive with stored contents opens like a folder.
+    if (entry.is_dir || entry.has_contents)
         open_directory(ducat::join_path(current_, entry.name));
+}
+
+bool MainWindow::inside_contents(const std::string& path)
+{
+    // Whether the entry of `path` or of a folder above it, in the folder
+    // holding it, has stored contents.
+    bool inside = false;
+    QString error;
+    with_database(
+        [&](ducat::Database& db) {
+            for (std::string dir = path; dir != "/" && !inside;) {
+                const std::size_t slash = dir.rfind('/');
+                const std::string parent = slash == 0 ? "/" : dir.substr(0, slash);
+                const std::string name = dir.substr(slash + 1);
+                if (const auto stored = db.load_directory(parent)) {
+                    for (const ducat::Node& entry : stored->children)
+                        inside = inside || (entry.name == name && entry.has_contents);
+                }
+                dir = parent;
+            }
+        },
+        error);
+    return inside;
 }
 
 void MainWindow::open_typed_path()
