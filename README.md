@@ -207,6 +207,13 @@ System, on by default, keeps scans from descending into other file systems.
 All actions are in the menus File, Go, Tools and Options; the toolbar holds
 the frequent ones.
 
+In every list, of a folder, of search matches or of duplicates, the columns
+can be widened and narrowed with the mouse; until one is, they fit their
+contents, and Fit Columns in the header's context menu makes them fit again.
+The list's context menu has Copy (Ctrl+C), which copies the selected rows as
+tab-separated values of the shown columns, e.g. for a spreadsheet, and Copy
+with Column Names, which adds the column names as the first line.
+
 File operations change the disk and keep the database up to date, without
 scanning the whole folder again. Copy (F5) and Move (F6) ask where to put the
 selected entries (Ctrl or Shift with a click selects several), offering the

@@ -4,6 +4,7 @@
 #include "duplicates_dialog.hpp"
 #include "file_operations.hpp"
 #include "gemini.hpp"
+#include "list_views.hpp"
 #include "plugins.hpp"
 #include "search_dialog.hpp"
 #include "usage_delegate.hpp"
@@ -223,13 +224,11 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
     view_->setAllColumnsShowFocus(true);
     view_->setSortingEnabled(true);
     view_->sortByColumn(DirectoryModel::Disk, Qt::DescendingOrder);
-    view_->header()->setStretchLastSection(false);
     view_->setItemDelegateForColumn(DirectoryModel::Usage, new UsageDelegate(view_));
     view_->setColumnHidden(DirectoryModel::Folder, true);
     view_->setColumnHidden(DirectoryModel::Database, true);
-    view_->header()->setSectionResizeMode(DirectoryModel::Name, QHeaderView::Stretch);
-    for (int column = DirectoryModel::Usage; column < DirectoryModel::ColumnCount; ++column)
-        view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    make_columns_resizable(view_, {DirectoryModel::Name});
+    add_copy_menu(view_);
     connect(view_, &QTreeView::activated, this, &MainWindow::open_entry);
     setCentralWidget(view_);
 

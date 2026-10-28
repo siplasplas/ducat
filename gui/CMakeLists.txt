@@ -9,6 +9,8 @@ add_executable(ducat-gui
     file_operations.hpp
     gemini.cpp
     gemini.hpp
+    list_views.cpp
+    list_views.hpp
     main.cpp
     main_window.cpp
     main_window.hpp

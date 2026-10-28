@@ -1,5 +1,6 @@
 #include "duplicates_dialog.hpp"
 
+#include "list_views.hpp"
 #include "main_window.hpp"
 #include "scope_selector.hpp"
 
@@ -159,10 +160,8 @@ QWidget* DuplicatesDialog::make_files_tab()
     files_model_->setHorizontalHeaderLabels(
         {tr("Name / copies"), tr("Size"), tr("Copies"), tr("Wasted")});
     files_view_ = make_view(tab, files_model_);
-    files_view_->header()->setStretchLastSection(false);
-    files_view_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    for (int column = 1; column < 4; ++column)
-        files_view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
+    make_columns_resizable(files_view_, {0});
+    add_copy_menu(files_view_);
     files_status_ = new QLabel(tr("Groups are sorted by the space taken by the copies beyond "
                                   "the first; their contents are not compared."),
                                tab);
@@ -211,12 +210,8 @@ QWidget* DuplicatesDialog::make_folders_tab()
     folders_view_ = make_view(tab, folders_proxy_);
     folders_view_->setRootIsDecorated(false);
     folders_view_->setSortingEnabled(true);
-    folders_view_->header()->setStretchLastSection(false);
-    for (int column = 0; column < 8; ++column) {
-        const bool folder = column == 2 || column == 5;
-        folders_view_->header()->setSectionResizeMode(
-            column, folder ? QHeaderView::Stretch : QHeaderView::ResizeToContents);
-    }
+    make_columns_resizable(folders_view_, {2, 5});
+    add_copy_menu(folders_view_);
     folders_status_ = new QLabel(tr("A folder is never paired with one inside it, and pairs "
                                     "inside a listed pair are left out."),
                                  tab);

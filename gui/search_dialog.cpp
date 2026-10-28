@@ -1,6 +1,7 @@
 #include "search_dialog.hpp"
 
 #include "directory_model.hpp"
+#include "list_views.hpp"
 #include "main_window.hpp"
 #include "scope_selector.hpp"
 
@@ -127,13 +128,8 @@ SearchDialog::SearchDialog(MainWindow& window)
     view_->sortByColumn(DirectoryModel::Disk, Qt::DescendingOrder);
     view_->setColumnHidden(DirectoryModel::Usage, true);
     view_->setColumnHidden(DirectoryModel::Database, true); // shown for several databases
-    view_->header()->setStretchLastSection(false);
-    view_->header()->resizeSection(DirectoryModel::Name, 260);
-    for (int column = DirectoryModel::Disk; column < DirectoryModel::Folder; ++column)
-        view_->header()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    view_->header()->setSectionResizeMode(DirectoryModel::Folder, QHeaderView::Stretch);
-    view_->header()->setSectionResizeMode(DirectoryModel::Database,
-                                          QHeaderView::ResizeToContents);
+    make_columns_resizable(view_, {DirectoryModel::Name, DirectoryModel::Folder});
+    add_copy_menu(view_);
     view_->setToolTip(tr("Enter or a double click shows the entry in the main window, "
                          "F3 shows a file when its drive is mounted, F4 edits it; F5, F6 "
                          "and F8 copy, move or trash the selected matches"));
