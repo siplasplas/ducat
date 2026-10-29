@@ -98,6 +98,10 @@ void print_usage(std::ostream& out)
            "  -a, --archives         Look also inside archives stored with scan -a\n"
            "  --min-files N          Directories with at least N files inside\n"
            "  --max-files N          Directories with at most N files inside\n"
+           "  --min-entries N        Directories with at least N entries directly in\n"
+           "                         them, files and folders, not counting what is\n"
+           "                         in their folders, e.g. folders of datasets\n"
+           "  --max-entries N        Directories with at most N entries directly in them\n"
            "  --newer WHEN           Modified at or after WHEN: YYYY-MM-DD[ HH:MM], or\n"
            "                         a period ago such as 30d, 2w, 6m, 1y, 12h\n"
            "  --older WHEN           Modified before WHEN\n"
@@ -378,7 +382,8 @@ int run_find(int argc, char* argv[], int first)
         if (arg == "-d" || arg == "--database" || arg == "-t" || arg == "--type" || arg == "-e"
             || arg == "--ext" || arg == "-n" || arg == "--name" || arg == "--min-size"
             || arg == "--max-size" || arg == "--min-files" || arg == "--max-files"
-            || arg == "--newer" || arg == "--older" || arg == "--sort" || arg == "--limit") {
+            || arg == "--min-entries" || arg == "--max-entries" || arg == "--newer"
+            || arg == "--older" || arg == "--sort" || arg == "--limit") {
             const std::optional<std::string_view> text = value();
             if (!text)
                 return 2;
@@ -414,6 +419,11 @@ int run_find(int argc, char* argv[], int first)
                 if (!count)
                     return invalid(*text);
                 (arg == "--min-files" ? query.min_files : query.max_files) = *count;
+            } else if (arg == "--min-entries" || arg == "--max-entries") {
+                const std::optional<std::uint64_t> count = parse_count(*text);
+                if (!count)
+                    return invalid(*text);
+                (arg == "--min-entries" ? query.min_entries : query.max_entries) = *count;
             } else if (arg == "--newer" || arg == "--older") {
                 const std::optional<std::int64_t> time = ducat::parse_time(*text, now);
                 if (!time)

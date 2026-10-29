@@ -48,6 +48,8 @@ private:
     QCheckBox* apparent_;
     QLineEdit* min_files_;
     QLineEdit* max_files_;
+    QLineEdit* min_entries_;
+    QLineEdit* max_entries_;
     QLineEdit* newer_;
     QLineEdit* older_;
     ScopeSelector* scope_;

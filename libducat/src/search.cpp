@@ -41,7 +41,7 @@ bool files_only(const SearchQuery& query)
 bool dirs_only(const SearchQuery& query)
 {
     return query.type == SearchQuery::Type::directory || query.min_files > 0
-        || query.max_files != std::numeric_limits<std::uint64_t>::max();
+        || query.max_files != std::numeric_limits<std::uint64_t>::max() || limits_entries(query);
 }
 
 // Whether something below the directory `dir` can match. Totals only grow
@@ -54,6 +54,9 @@ bool may_contain_match(const SearchQuery& query, const Node& dir)
     if (total < query.min_size)
         return false;
     if (dir.files < query.min_files)
+        return false;
+    // A directory below holds at most all the entries below this one.
+    if (dir.files + dir.dirs < query.min_entries)
         return false;
     if (files_only(query) && dir.files == 0)
         return false;
@@ -78,7 +81,8 @@ public:
             return true; // e.g. a directory that could not be read
         for (const Node& entry : dir->children) {
             const std::string entry_path = join_path(path, entry.name);
-            if (matches(query_, entry) && !on_match_(entry_path, entry))
+            if (matches(query_, entry) && entries_match(entry_path)
+                && !on_match_(entry_path, entry))
                 return false;
             if (entry.is_dir && may_contain_match(query_, entry) && !visit(entry_path))
                 return false;
@@ -89,6 +93,17 @@ public:
     }
 
 private:
+    // The limits on the entries directly in the directory at `path`, read
+    // from the main record of the directory only.
+    bool entries_match(const std::string& path)
+    {
+        if (!limits_entries(query_))
+            return true;
+        const std::optional<record::DirectoryRecord> record = db_.read_directory(path);
+        return record && record->entry_count >= query_.min_entries
+            && record->entry_count <= query_.max_entries;
+    }
+
     Database& db_;
     const SearchQuery& query_;
     const SearchCallback& on_match_;
@@ -119,6 +134,11 @@ bool matches(const SearchQuery& query, const Node& entry)
     if (entry.is_dir && (entry.files < query.min_files || entry.files > query.max_files))
         return false;
     return entry.modified >= query.modified_after && entry.modified < query.modified_before;
+}
+
+bool limits_entries(const SearchQuery& query)
+{
+    return query.min_entries > 0 || query.max_entries != std::numeric_limits<std::uint64_t>::max();
 }
 
 bool search(const std::vector<Scope>& scopes, const SearchQuery& query,

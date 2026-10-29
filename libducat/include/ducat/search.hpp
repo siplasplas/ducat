@@ -37,6 +37,13 @@ struct SearchQuery {
     std::uint64_t min_files = 0;
     std::uint64_t max_files = std::numeric_limits<std::uint64_t>::max();
 
+    // Limits on the number of entries directly in a directory, files and
+    // subdirectories, not counting what is in the subdirectories, inclusive;
+    // e.g. to find folders of datasets with many images. When set, only
+    // directories match.
+    std::uint64_t min_entries = 0;
+    std::uint64_t max_entries = std::numeric_limits<std::uint64_t>::max();
+
     // Modification time limits, seconds since the epoch: after <= time < before.
     // A directory's time is its own, not that of its contents.
     std::int64_t modified_after = std::numeric_limits<std::int64_t>::min();
@@ -51,8 +58,12 @@ struct SearchQuery {
 // The size the query compares for an entry.
 std::uint64_t search_size(const SearchQuery& query, const Node& entry);
 
-// Whether an entry meets the criteria of the query.
+// Whether an entry meets the criteria of the query, except the limits on
+// entries directly in a directory, which its entry does not hold.
 bool matches(const SearchQuery& query, const Node& entry);
+
+// Whether the query limits the entries directly in directories.
+bool limits_entries(const SearchQuery& query);
 
 // Called with the full path and the entry of each match; returning false
 // stops the search.

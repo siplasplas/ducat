@@ -75,6 +75,9 @@ without touching the disk. All given criteria must hold:
   logical size instead;
 - `--min-files N`, `--max-files N`: directories with that many files inside,
   at any depth;
+- `--min-entries N`, `--max-entries N`: directories with that many entries
+  directly in them, files and folders, not counting what is in their folders,
+  e.g. the folders of image datasets (in the GUI, Entries directly in);
 - `--newer WHEN`, `--older WHEN`: modified at or after, or before, a local
   date `YYYY-MM-DD[ HH:MM]` or a period ago such as `30d`, `2w`, `6m` or `1y`.
   A directory's time is its own, not that of its contents.
@@ -87,6 +90,7 @@ little of the database. Examples:
 ```sh
 ducat find -t d --min-size 10G            # directories of 10 GiB or more
 ducat find --min-files 100000 --sort files
+ducat find --min-entries 10000            # folders with 10,000 entries or more
 ducat find ~ -e iso,img --min-size 1G
 ducat find /var/log -n '*.log' --older 1y
 ```

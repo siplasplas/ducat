@@ -83,6 +83,7 @@ SearchDialog::SearchDialog(MainWindow& window)
       min_size_(line_edit(this, tr("e.g. 500M"))), max_size_(line_edit(this, tr("e.g. 2G"))),
       apparent_(new QCheckBox(tr("Logical size"), this)),
       min_files_(line_edit(this, tr("number"))), max_files_(line_edit(this, tr("number"))),
+      min_entries_(line_edit(this, tr("e.g. 10000"))), max_entries_(line_edit(this, tr("number"))),
       newer_(line_edit(this, tr("e.g. 30d or 2024-01-31"))),
       older_(line_edit(this, tr("e.g. 1y or 2024-01-31 18:00"))),
       scope_(new ScopeSelector(window, this)),
@@ -96,7 +97,8 @@ SearchDialog::SearchDialog(MainWindow& window)
     type_->addItem(tr("Files"));
     type_->addItem(tr("Folders"));
     apparent_->setToolTip(tr("Compare the logical size (st_size) instead of disk usage"));
-    for (QLineEdit* edit : {min_size_, max_size_, min_files_, max_files_, newer_, older_})
+    for (QLineEdit* edit :
+         {min_size_, max_size_, min_files_, max_files_, min_entries_, max_entries_, newer_, older_})
         edit->setMaximumWidth(fontMetrics().horizontalAdvance(QStringLiteral("0")) * 26);
 
     auto* form = new QFormLayout;
@@ -105,6 +107,10 @@ SearchDialog::SearchDialog(MainWindow& window)
     form->addRow(tr("Extensions:"), extensions_);
     form->addRow(tr("Size from:"), pair(this, min_size_, tr("to"), max_size_, apparent_));
     form->addRow(tr("Files inside from:"), pair(this, min_files_, tr("to"), max_files_));
+    min_entries_->setToolTip(tr("Entries directly in a folder, files and folders, not counting "
+                                "what is in its folders; e.g. folders of image datasets"));
+    max_entries_->setToolTip(min_entries_->toolTip());
+    form->addRow(tr("Entries directly in from:"), pair(this, min_entries_, tr("to"), max_entries_));
     form->addRow(tr("Modified after:"), pair(this, newer_, tr("before"), older_));
     form->addRow(tr("Look in:"), scope_);
     in_contents_->setToolTip(tr("Search also the contents of archives scanned into the "
@@ -210,7 +216,7 @@ void SearchDialog::run_search()
         if (const auto value = parse_count(text))
             out = *value;
         else if (invalid.isEmpty())
-            invalid = tr("Not a number of files: %1").arg(text);
+            invalid = tr("Not a number: %1").arg(text);
     };
     const std::time_t now = std::time(nullptr);
     const auto time = [&](QLineEdit* edit, std::int64_t& out) {
@@ -226,6 +232,8 @@ void SearchDialog::run_search()
     size(max_size_, query.max_size);
     count(min_files_, query.min_files);
     count(max_files_, query.max_files);
+    count(min_entries_, query.min_entries);
+    count(max_entries_, query.max_entries);
     time(newer_, query.modified_after);
     time(older_, query.modified_before);
     if (!invalid.isEmpty()) {
@@ -279,7 +287,8 @@ void SearchDialog::clear_criteria()
 {
     type_->setCurrentIndex(0);
     for (QLineEdit* edit :
-         {name_, extensions_, min_size_, max_size_, min_files_, max_files_, newer_, older_})
+         {name_, extensions_, min_size_, max_size_, min_files_, max_files_, min_entries_,
+          max_entries_, newer_, older_})
         edit->clear();
     apparent_->setChecked(false);
     clear_results();

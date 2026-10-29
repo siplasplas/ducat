@@ -244,6 +244,56 @@ void test_search()
     CHECK(thrown);
 }
 
+// Directories by the entries directly in them, not below their subfolders.
+void test_entries()
+{
+    TempDir temp;
+    const fs::path root = temp.path() / "tree";
+    for (const char* dir : {"many", "sets/s1", "sets/s2/sub", "empty"})
+        fs::create_directories(root / dir);
+    for (int i = 0; i < 60; ++i)
+        write_file(root / "many" / ("f" + std::to_string(i)), 10);
+    for (int i = 0; i < 30; ++i)
+        write_file(root / "sets" / "s1" / ("img" + std::to_string(i)), 10);
+    for (int i = 0; i < 5; ++i)
+        write_file(root / "sets" / "s2" / ("img" + std::to_string(i)), 10);
+    ducat::Database db((temp.path() / "test.ducat").string(), ducat::Database::Mode::write);
+    const ducat::ScanResult scan = ducat::scan_tree(root.string());
+    db.store(scan);
+
+    // sets holds 2 entries, though 35 files and 3 folders are below it.
+    ducat::SearchQuery q;
+    q.min_entries = 20;
+    CHECK(find(db, q, root) == (Paths{"many", "sets/s1"}));
+    q.max_entries = 40;
+    CHECK(find(db, q, root) == (Paths{"sets/s1"}));
+    q = {};
+    q.max_entries = 0;
+    CHECK(find(db, q, root) == (Paths{"empty", "sets/s2/sub"}));
+    q = {};
+    q.min_entries = 6; // s2: 5 files and a folder
+    q.max_entries = 6;
+    CHECK(find(db, q, root) == (Paths{"sets/s2"}));
+
+    // Pruning by the entries below finds what a full walk finds.
+    for (const std::uint64_t min : {1ull, 2ull, 6ull, 31ull, 60ull, 61ull}) {
+        ducat::SearchQuery p;
+        p.min_entries = min;
+        Paths expected;
+        const auto walk = [&](auto& self, const ducat::Node& node, const std::string& prefix)
+            -> void {
+            for (const ducat::Node& child : node.children) {
+                const std::string path = prefix.empty() ? child.name : prefix + "/" + child.name;
+                if (child.is_dir && child.children.size() >= min)
+                    expected.insert(path);
+                self(self, child, path);
+            }
+        };
+        walk(walk, scan.root, "");
+        CHECK(find(db, p, root) == expected);
+    }
+}
+
 // Two databases searched at once, e.g. of a home directory and of drives.
 void test_scopes()
 {
@@ -315,6 +365,7 @@ int main()
     test_parse_size();
     test_parse_time();
     test_search();
+    test_entries();
     test_scopes();
     test_contents();
     test_archive_names();
