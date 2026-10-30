@@ -808,16 +808,26 @@ PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& option
 RefreshResult apply_refresh(Database& db, PreparedRefresh prepared)
 {
     const Node* parent_own = prepared.parent ? &*prepared.parent : nullptr;
-    RefreshResult result;
+    const std::optional<record::DirectoryRecord> stored = db.read_directory(prepared.root);
     if (!prepared.scan) {
-        if (!db.read_directory(prepared.root))
+        if (!stored)
             throw std::system_error(prepared.scan_error, std::generic_category(), prepared.root);
-        db.remove(prepared.root, parent_own);
-        result.removed = true;
-    } else {
-        db.store(*prepared.scan, parent_own);
-        result.scan = std::move(*prepared.scan);
+        throw NotOnDisk(prepared.root
+                        + ": not on disk now, so the database is unchanged; if it is gone for "
+                          "good, forget it");
     }
+    // A stored tree with entries that is empty now is most likely the
+    // mount point of a drive that is not mounted.
+    const bool tree_root = prepared.root == "/"
+        || !db.read_directory(split_path(prepared.root).first);
+    if (stored && tree_root && stored->entry_count > 0 && prepared.scan->root.children.empty())
+        throw NotOnDisk(prepared.root
+                        + ": empty now, as a drive that is not mounted, so the database is "
+                          "unchanged; if it was emptied, forget it and scan it again");
+
+    db.store(*prepared.scan, parent_own);
+    RefreshResult result;
+    result.scan = std::move(*prepared.scan);
     // Rebuilding /usr (870,000 entries) takes some 25 ms, so do it when due.
     db.compact();
     return result;
@@ -826,6 +836,18 @@ RefreshResult apply_refresh(Database& db, PreparedRefresh prepared)
 RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& options)
 {
     return apply_refresh(db, prepare_refresh(path, options));
+}
+
+Forgotten forget(Database& db, std::string_view path)
+{
+    const std::string dir = normalize_path(path);
+    const std::optional<record::DirectoryRecord> stored = db.read_directory(dir);
+    if (!stored)
+        throw DatabaseError(dir + " is not a stored folder");
+    const Forgotten forgotten{stored->dir.files, stored->dir.dirs, stored->dir.total_disk};
+    db.remove(dir);
+    db.compact();
+    return forgotten;
 }
 
 bool update_entry(Database& db, std::string_view path, const ScanOptions& options)

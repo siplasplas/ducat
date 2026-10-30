@@ -121,7 +121,6 @@ private:
     // The result of a background scan, passed back to the GUI thread.
     struct ScanOutcome {
         std::string root;
-        bool removed = false;
         bool cancelled = false;
         QString error;               // empty on success
         std::uint64_t entries = 0;
@@ -151,6 +150,8 @@ private:
     void store_live_archive();
     // Removes the stored contents of the archives below the shown folder.
     void strip_archives();
+    // Removes the shown folder from the database, not from disk.
+    void forget_folder();
     // Opens the selected entry's folder in gemini-commander, the entry selected.
     void open_in_gemini_commander();
     // Whether `path` lies in the stored contents of an archive, not on disk.
@@ -188,6 +189,7 @@ private:
     QAction* one_file_system_action_;
     QAction* archives_action_;
     QAction* strip_action_;
+    QAction* forget_action_;
     QAction* database_action_;
     QMenu* trees_menu_;
     SearchDialog* search_dialog_ = nullptr; // created when first needed

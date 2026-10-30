@@ -15,6 +15,7 @@ ducat scan [-x] [-j N] [-a] [-d FILE] PATH
 ducat ls [-d FILE] [PATH]
 ducat trees [-d FILE]
 ducat compact [-d FILE]
+ducat forget [-d FILE] PATH
 ducat strip [-d FILE] [PATH]
 ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]
 ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]
@@ -39,9 +40,16 @@ away with the scan.
 
 A new scan of a stored `PATH` replaces the stored data. When `PATH` lies inside
 a stored tree, only that branch is scanned: its entry in the directory above
-and the totals of all stored directories above are updated. A `PATH` that no
-longer exists is removed from the database the same way. Hard links are then
-counted once within the rescanned branch only.
+and the totals of all stored directories above are updated. Hard links are
+then counted once within the rescanned branch only.
+
+A scan never removes from the database what is not on disk, as a drive may
+only be away: a stored `PATH` that does not exist now, or a stored tree that
+is empty now, as the mount point of a drive that is not mounted, is left as
+it is, with a message. `ducat forget PATH` removes a stored folder, a whole
+tree or a branch, from the database on purpose, e.g. a drive formatted or
+renamed since; the files on disk stay. In the GUI, File > Forget Folder does
+so for the shown folder.
 
 Entries that cannot be read are reported on standard error and the scan goes
 on; the exit status is then 1.

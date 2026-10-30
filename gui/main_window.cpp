@@ -127,6 +127,10 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
                                          &MainWindow::strip_archives);
     strip_action_->setToolTip(tr("Remove the stored contents of the archives below the shown "
                                  "folder to make the database smaller"));
+    forget_action_ = file_menu->addAction(icon("edit-delete", QStyle::SP_TrashIcon),
+                                          tr("&Forget Folder…"), this, &MainWindow::forget_folder);
+    forget_action_->setToolTip(tr("Remove the shown folder, e.g. a whole tree of a drive "
+                                  "formatted since, from the database; the files on disk stay"));
 
     file_menu->addSeparator();
     database_action_ = file_menu->addAction(icon("document-open", QStyle::SP_DialogOpenButton),
@@ -669,6 +673,60 @@ void MainWindow::transfer(TransferKind kind)
     statusBar()->showMessage(message);
 }
 
+void MainWindow::forget_folder()
+{
+    if (current_.empty())
+        return;
+    if (scan_thread_.joinable()) {
+        show_error(tr("Wait for the scan to end"));
+        return;
+    }
+    if ((live_ && (current_ == live_->path || is_inside(current_, live_->path)))
+        || inside_contents(current_)) {
+        show_error(tr("Go to a folder outside the archive first"));
+        return;
+    }
+    const std::string folder = current_;
+    if (!confirm(this, tr("Forget Folder"),
+                 tr("Remove %1 and everything below it from the database?\n\nThe files on disk "
+                    "stay; a scan stores the folder again.")
+                     .arg(to_qstring(folder))))
+        return;
+
+    ducat::Forgotten forgotten;
+    bool parent_stored = false;
+    {
+        const std::unique_lock lock(database_mutex_, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            show_error(tr("The database is being written; try again in a moment"));
+            return;
+        }
+        try {
+            ducat::Database db(database_, ducat::Database::Mode::write);
+            forgotten = ducat::forget(db, folder);
+            parent_stored = folder != "/" && db.read_directory(parent_of(folder)).has_value();
+            db.close();
+        } catch (const ducat::DatabaseError& e) {
+            show_error(QString::fromUtf8(e.what()));
+            return;
+        }
+    }
+    // The folder above, or the first stored tree when a whole tree went.
+    refresh_dialog_scopes();
+    if (!parent_stored || !open_directory(parent_of(folder))) {
+        current_.clear();
+        model_->set_rows({});
+        totals_->clear();
+        path_edit_->clear();
+        update_title();
+        open_first_directory();
+    }
+    statusBar()->showMessage(tr("Removed %1 from the database: %2 files, %3; the files on disk "
+                                "stay")
+                                 .arg(to_qstring(folder), count_text(forgotten.files),
+                                      to_qstring(ducat::format_size(forgotten.disk))));
+}
+
 void MainWindow::strip_archives()
 {
     if (current_.empty())
@@ -802,6 +860,7 @@ void MainWindow::start_scan(const std::string& path)
     one_file_system_action_->setEnabled(false);
     archives_action_->setEnabled(false);
     strip_action_->setEnabled(false);
+    forget_action_->setEnabled(false);
     database_action_->setEnabled(false);
     progress_label_->show();
     progress_bar_->show();
@@ -842,11 +901,12 @@ void MainWindow::start_scan(const std::string& path)
             ducat::Database db(database_, ducat::Database::Mode::write);
             const ducat::RefreshResult result = ducat::apply_refresh(db, std::move(prepared));
             db.close();
-            outcome.removed = result.removed;
             outcome.entries = result.scan.root.files + result.scan.root.dirs;
             outcome.errors += result.scan.errors.size();
         } catch (const ducat::ScanCancelled&) {
             outcome.cancelled = true;
+        } catch (const ducat::NotOnDisk& e) {
+            outcome.error = tr("%1 (File > Forget Folder)").arg(QString::fromUtf8(e.what()));
         } catch (const std::system_error& e) {
             outcome.error = tr("%1: %2").arg(to_qstring(outcome.root),
                                              QString::fromLocal8Bit(std::strerror(e.code().value())));
@@ -897,6 +957,7 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
     one_file_system_action_->setEnabled(true);
     archives_action_->setEnabled(Plugins::instance().archive() != nullptr);
     strip_action_->setEnabled(true);
+    forget_action_->setEnabled(true);
     database_action_->setEnabled(true);
 
     if (outcome.cancelled) {
@@ -908,28 +969,17 @@ void MainWindow::finish_scan(const ScanOutcome& outcome)
         return;
     }
 
-    // A scan may have added or removed a stored tree.
+    // A scan may have added a stored tree.
     refresh_dialog_scopes();
-    QString message;
-    if (outcome.removed) {
-        // Show the parent, or keep the current directory if it is elsewhere.
-        if (current_ == outcome.root || current_.starts_with(outcome.root + "/"))
-            open_directory(parent_of(outcome.root));
-        else if (!current_.empty())
-            open_directory(current_, selected_name());
-        message = tr("%1 no longer exists and was removed from the database")
-                      .arg(to_qstring(outcome.root));
-    } else {
-        if (outcome.root == current_)
-            open_directory(current_, selected_name());
-        else
-            open_directory(outcome.root);
-        message = tr("Scanned %1: %2 entries in %3 s")
-                      .arg(to_qstring(outcome.root), count_text(outcome.entries),
-                           QLocale().toString(outcome.seconds, 'f', 1));
-        if (outcome.errors > 0)
-            message += tr(", %n unreadable", nullptr, static_cast<int>(outcome.errors));
-    }
+    if (outcome.root == current_)
+        open_directory(current_, selected_name());
+    else
+        open_directory(outcome.root);
+    QString message = tr("Scanned %1: %2 entries in %3 s")
+                          .arg(to_qstring(outcome.root), count_text(outcome.entries),
+                               QLocale().toString(outcome.seconds, 'f', 1));
+    if (outcome.errors > 0)
+        message += tr(", %n unreadable", nullptr, static_cast<int>(outcome.errors));
     statusBar()->showMessage(message);
 }
 

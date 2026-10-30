@@ -34,6 +34,7 @@ void print_usage(std::ostream& out)
            "       ducat ls [-d FILE] [PATH]\n"
            "       ducat trees [-d FILE]\n"
            "       ducat compact [-d FILE]\n"
+           "       ducat forget [-d FILE] PATH\n"
            "       ducat strip [-d FILE] [PATH]\n"
            "       ducat find [-d FILE]... [PATH]... [CRITERIA] [--sort KEY] [--limit N]\n"
            "       ducat dups [-d FILE]... [PATH]... [--time] [--min-size SIZE] [--limit N]\n"
@@ -45,8 +46,9 @@ void print_usage(std::ostream& out)
            "Commands:\n"
            "  scan PATH      Scan the directory tree at PATH, store it in the database\n"
            "                 and print its totals and entries sorted by disk usage;\n"
-           "                 inside a stored tree this refreshes just that branch,\n"
-           "                 and a PATH that no longer exists is removed. With -a\n"
+           "                 inside a stored tree this refreshes just that branch.\n"
+           "                 A stored PATH not on disk now, or a stored tree empty now\n"
+           "                 (an unmounted drive), is left as it is; see forget. With -a\n"
            "                 (--archives) the contents of archives are stored too;\n"
            "                 those stored before stay for archives that did not change\n"
            "  ls [PATH]      Print a directory from the database, like scan does;\n"
@@ -54,6 +56,9 @@ void print_usage(std::ostream& out)
            "  trees          List the stored trees with their disk usage\n"
            "  compact        Rebuild the database file to give back unused space;\n"
            "                 scan does this by itself when the file has grown much\n"
+           "  forget PATH    Remove the stored folder PATH, a whole tree or a branch,\n"
+           "                 from the database, e.g. a drive formatted since; the\n"
+           "                 files on disk stay\n"
            "  strip [PATH]   Remove the stored contents of the archives below PATH, or\n"
            "                 in the whole database, which then is compacted; the\n"
            "                 archives stay as files\n"
@@ -242,15 +247,12 @@ int run_scan(int argc, char* argv[], int first)
     } catch (const std::system_error& e) {
         std::cerr << "ducat: " << line.path << ": " << std::strerror(e.code().value()) << '\n';
         return 1;
+    } catch (const ducat::NotOnDisk& e) {
+        std::cerr << "ducat: " << e.what() << " (ducat forget PATH)\n";
+        return 1;
     }
     db.close();
     const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
-
-    if (result.removed) {
-        std::printf("%s: no longer exists, removed from the database\n",
-                    ducat::resolve_path(line.path).c_str());
-        return 0;
-    }
 
     const ducat::ScanResult& scan = result.scan;
     for (const ducat::ScanError& error : scan.errors)
@@ -641,6 +643,32 @@ int run_strip(int argc, char* argv[], int first)
     return 0;
 }
 
+int run_forget(int argc, char* argv[], int first)
+{
+    CommandLine line;
+    if (!parse_options(argc, argv, first, false, line))
+        return 2;
+    if (line.path.empty()) {
+        std::cerr << "ducat: forget needs a PATH\n";
+        return 2;
+    }
+    if (!std::filesystem::exists(line.database)) {
+        std::cerr << "ducat: " << line.database << ": no such database\n";
+        return 1;
+    }
+    // Not resolved: the path may be gone, or be a symlink stored as it is.
+    const std::string path = ducat::normalize_path(line.path);
+    ducat::Database db(line.database, ducat::Database::Mode::write);
+    const ducat::Forgotten forgotten = ducat::forget(db, path);
+    db.close();
+    std::printf("%s: removed from the database (%llu files, %llu folders, %s); the files on "
+                "disk stay\n",
+                path.c_str(), static_cast<unsigned long long>(forgotten.files),
+                static_cast<unsigned long long>(forgotten.dirs),
+                ducat::format_size(forgotten.disk).c_str());
+    return 0;
+}
+
 int run_compact(int argc, char* argv[], int first)
 {
     CommandLine line;
@@ -694,6 +722,8 @@ int main(int argc, char* argv[])
             return run_trees(argc, argv, 2);
         if (arg == "compact")
             return run_compact(argc, argv, 2);
+        if (arg == "forget")
+            return run_forget(argc, argv, 2);
         if (arg == "strip")
             return run_strip(argc, argv, 2);
         if (arg == "find")

@@ -222,18 +222,30 @@ void test_refresh_branch()
     ducat::refresh(db, (root / "sub" / "added").string());
     check_matches_full_scan(db, root);
 
-    // A removed directory.
+    // A directory gone from disk is not removed by a refresh, which may be
+    // of a drive that is away, but by forget; refreshing the folder above
+    // brings that one's own data up to date.
     fs::remove_all(root / "sub-2");
-    CHECK(ducat::refresh(db, (root / "sub-2").string()).removed);
-    check_matches_full_scan(db, root);
+    bool refused = false;
+    try {
+        ducat::refresh(db, (root / "sub-2").string());
+    } catch (const ducat::NotOnDisk&) {
+        refused = true;
+    }
+    CHECK(refused);
+    CHECK(db.read_directory((root / "sub-2").string()).has_value());
+    const ducat::Forgotten forgotten = ducat::forget(db, (root / "sub-2").string());
+    CHECK_EQ(forgotten.files, 1u);
     CHECK(!db.read_directory((root / "sub-2").string()));
+    ducat::refresh(db, root.string());
+    check_matches_full_scan(db, root);
 
     // New entries add a segment to the parent, removed ones drop it again.
     const std::string big = (root / "big").string();
     for (int i = 0; i < 30; ++i) {
         const fs::path dir = root / "big" / ("d" + std::to_string(i));
         fs::create_directory(dir);
-        CHECK(!ducat::refresh(db, dir.string()).removed);
+        ducat::refresh(db, dir.string());
     }
     check_matches_full_scan(db, root);
     const std::optional<ducat::record::DirectoryRecord> grown = db.read_directory(big);
@@ -242,8 +254,9 @@ void test_refresh_branch()
     for (int i = 0; i < 30; ++i) {
         const fs::path dir = root / "big" / ("d" + std::to_string(i));
         fs::remove(dir);
-        CHECK(ducat::refresh(db, dir.string()).removed);
+        ducat::forget(db, dir.string());
     }
+    ducat::refresh(db, big);
     check_matches_full_scan(db, root);
     const std::optional<ducat::record::DirectoryRecord> shrunk = db.read_directory(big);
     CHECK(shrunk && shrunk->entry_count == 71 && shrunk->segment_count == 2);
@@ -254,6 +267,33 @@ void test_refresh_branch()
     CHECK_EQ(refresh_error(db, root / "never-stored"), ENOENT);
     db.remove((root / "never-stored").string());
     check_matches_full_scan(db, root);
+    bool not_stored = false;
+    try {
+        ducat::forget(db, (root / "never-stored").string());
+    } catch (const ducat::DatabaseError&) {
+        not_stored = true;
+    }
+    CHECK(not_stored);
+
+    // A stored tree empty now, like the mount point of an unmounted drive,
+    // is left as it is; forget removes the whole tree.
+    const fs::path drive = temp.path() / "drive";
+    fs::create_directories(drive / "photos");
+    write_file(drive / "photos" / "a.jpg", 100);
+    ducat::refresh(db, drive.string());
+    fs::remove_all(drive / "photos");
+    bool empty_refused = false;
+    try {
+        ducat::refresh(db, drive.string());
+    } catch (const ducat::NotOnDisk&) {
+        empty_refused = true;
+    }
+    CHECK(empty_refused);
+    CHECK(db.read_directory((drive / "photos").string()).has_value());
+    ducat::forget(db, drive.string());
+    CHECK(!db.read_directory(drive.string()));
+    CHECK(!db.read_directory((drive / "photos").string()));
+    CHECK(db.roots() == std::vector<std::string>{root.string()});
 }
 
 void test_update_entry()

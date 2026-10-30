@@ -23,6 +23,15 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+// Thrown by apply_refresh when a stored directory is not on disk now, or a
+// stored tree is empty now, as a drive's mount point while it is unmounted:
+// the database is not changed, as the drive may only be away. forget
+// removes such a directory when it is gone for good.
+class NotOnDisk : public DatabaseError {
+public:
+    using DatabaseError::DatabaseError;
+};
+
 // A database of scanned directories in a Tkrzw TreeDBM file, with records as
 // described in record.hpp. Paths passed to the methods are normalized with
 // normalize_path. Errors, including corrupted records, throw DatabaseError.
@@ -194,8 +203,7 @@ struct PreparedRefresh {
 };
 
 struct RefreshResult {
-    ScanResult scan;               // empty when the tree was removed
-    bool removed = false;          // the path no longer exists and was removed
+    ScanResult scan;
 };
 
 // Scans the tree at `path` (resolved with resolve_path) and reads the own
@@ -205,9 +213,11 @@ struct RefreshResult {
 PreparedRefresh prepare_refresh(std::string_view path, const ScanOptions& options = {});
 
 // Stores a prepared scan, which brings a whole stored tree or one branch of
-// it up to date, or removes a root that no longer exists, then compacts the
-// database when due (see Database::compact). Throws
-// std::system_error with scan_error when that root is not stored either.
+// it up to date, then compacts the database when due (see
+// Database::compact). Never removes what is not on disk: throws NotOnDisk
+// when the root is stored but gone, or is a stored tree with entries that
+// is empty now (likely an unmounted drive), and std::system_error with
+// scan_error when it is gone and not stored either.
 RefreshResult apply_refresh(Database& db, PreparedRefresh prepared);
 
 // prepare_refresh followed by apply_refresh.
@@ -221,5 +231,18 @@ RefreshResult refresh(Database& db, std::string_view path, const ScanOptions& op
 // an unmounted drive). `path` is normalized, not resolved. Returns whether
 // the database changed.
 bool update_entry(Database& db, std::string_view path, const ScanOptions& options = {});
+
+// What forget removed.
+struct Forgotten {
+    std::uint64_t files = 0;
+    std::uint64_t dirs = 0;        // below it
+    std::uint64_t disk = 0;
+};
+
+// Removes the stored directory at `path` (normalized, not resolved) from the
+// database, whether it is on disk or not: a whole stored tree, or a branch,
+// whose share of the totals above goes too. The files on disk stay. Throws
+// DatabaseError when `path` is not a stored directory.
+Forgotten forget(Database& db, std::string_view path);
 
 } // namespace ducat
