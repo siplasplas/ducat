@@ -402,17 +402,15 @@ void MainWindow::open_in_gemini_commander()
 {
     if (current_.empty())
         return;
-    // A folder ends in '/', which gemini-commander enters; a file it selects.
+    // The selected entry, a file or a folder, without a trailing '/', which
+    // gemini-commander selects in the shown folder; with none, the shown
+    // folder with '/', which it enters.
     const QModelIndex index = view_->currentIndex();
     std::string path = current_;
-    if (index.isValid()) {
-        const ducat::Node& entry = model_->entry(index.row());
-        path = ducat::join_path(current_, entry.name);
-        if (entry.is_dir)
-            path += '/';
-    } else if (path != "/") {
+    if (index.isValid())
+        path = ducat::join_path(current_, model_->entry(index.row()).name);
+    else if (path != "/")
         path += '/';
-    }
     open_paths_in_gemini({path});
 }
 

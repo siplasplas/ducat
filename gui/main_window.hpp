@@ -105,6 +105,8 @@ public:
     // archive stands for the archive); else explains in the status bar. A
     // folder ending in '/' is entered, one without it is selected in the
     // folder above it.
+    // Callers send folders without '/', except the shown folder of the main
+    // window when no entry is selected.
     // `parent` is the window the user works in, for the activation token;
     // `report` shows the outcome there, by default in the status bar.
     void open_paths_in_gemini(const std::vector<std::string>& paths, QWidget* parent = nullptr,
