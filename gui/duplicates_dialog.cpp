@@ -23,6 +23,7 @@
 #include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QTimer>
 #include <QShortcut>
 #include <QSortFilterProxyModel>
 #include <QSpinBox>
@@ -482,26 +483,63 @@ void DuplicatesDialog::operate(EntryOperation operation)
     if (entries.empty())
         return;
 
-    // Trashing every copy of a file leaves none: asked about once more.
+    // Trashing never takes every copy of a file: where all are selected, one
+    // stays, the first of the group or the one with the shortest path.
     if (files && operation == EntryOperation::trash) {
-        int whole = 0;
+        std::vector<std::vector<std::string>> whole; // the copies, as listed
         for (int group = 0; group < files_model_->rowCount(); ++group) {
             const QModelIndex parent = files_model_->index(group, 0);
             const int copies = files_model_->rowCount(parent);
-            int chosen = 0;
+            std::vector<std::string> paths;
             for (int copy = 0; copy < copies; ++copy) {
                 if (view->selectionModel()->isRowSelected(copy, parent))
-                    ++chosen;
+                    paths.push_back(files_model_->index(copy, 0, parent)
+                                        .data(path_role)
+                                        .toString()
+                                        .toStdString());
             }
-            whole += copies > 0 && chosen == copies;
+            if (copies > 0 && static_cast<int>(paths.size()) == copies)
+                whole.push_back(std::move(paths));
         }
-        if (whole > 0
-            && !confirm(this, tr("Move to Trash"),
-                        tr("All copies of %n files are selected, so no copy of them would be "
-                           "left. Go on?",
-                           nullptr, whole),
-                        true))
-            return;
+        if (!whole.empty()) {
+            QMessageBox box(QMessageBox::Question, tr("Move to Trash"),
+                            whole.size() == 1
+                                ? tr("All copies of a file are selected. Which one stays?")
+                                : tr("All copies of %1 files are selected. Which one of each "
+                                     "stays?")
+                                      .arg(whole.size()),
+                            QMessageBox::NoButton, this);
+            box.setInformativeText(tr("The others go to the trash with the rest of the "
+                                      "selection."));
+            QPushButton* first = box.addButton(tr("Keep the &First of Each"),
+                                               QMessageBox::AcceptRole);
+            QPushButton* shortest = box.addButton(tr("Keep the &Shortest Path"),
+                                                  QMessageBox::AcceptRole);
+            box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(first);
+            box.setEscapeButton(QMessageBox::Cancel);
+            QTimer::singleShot(0, first, [first] { first->setFocus(); });
+            box.exec();
+            if (box.clickedButton() != first && box.clickedButton() != shortest)
+                return;
+            std::set<std::string> kept;
+            for (const std::vector<std::string>& paths : whole) {
+                // The shortest path; among equal lengths the first listed.
+                auto keep = paths.begin();
+                if (box.clickedButton() == shortest) {
+                    keep = std::min_element(paths.begin(), paths.end(),
+                                            [](const std::string& a, const std::string& b) {
+                                                return a.size() < b.size();
+                                            });
+                }
+                kept.insert(*keep);
+            }
+            std::erase_if(entries, [&](const StoredEntry& entry) {
+                return kept.count(entry.path) > 0;
+            });
+            if (entries.empty())
+                return;
+        }
     }
 
     // Where the cursor goes afterwards: the place of the first selected entry,

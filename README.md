@@ -282,8 +282,10 @@ Copy (F5), Move (F6) and Move to Trash (F8) work there as among search
 matches, on the selected copies of files, or on the folders whose cells are
 selected: the Folder cell (or its Files and Disk usage) chooses the first
 folder of a pair, the Other folder cell the second, and Ctrl or Shift with a
-click adds more. Trashing every copy of a file, or moving or trashing both
-folders of a pair, is asked about once more. Copies moved or trashed leave the
+click adds more. Trashing never takes every copy of a file: when all copies
+of some files are selected, it asks which one of each stays, the first
+listed (Enter) or the one with the shortest path, or cancels (Escape).
+Moving or trashing both folders of a pair is asked about once more. Copies moved or trashed leave the
 list, and so do groups left with a single copy and pairs with a folder gone.
 
 Merge Into the Other Folder (Ctrl+M), for folders that are not whole copies,
