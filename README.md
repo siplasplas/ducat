@@ -298,6 +298,13 @@ the other way round, stays where it is, with the folders holding it, and is
 reported. Nothing is deleted for good, and the databases of both folders
 are updated.
 
+Merging never loses a file of the other folder: a newer file is put next to
+the one it replaces, under another name, before that one goes to the trash,
+so a failed copy or trash leaves the old file in place; without a usable
+trash nothing is replaced or thrown away. The same folder reached through a
+symlink or a bind mount, folders one inside the other, and selected merges
+that share a folder are refused. The test `merge` checks these cases.
+
 View (F3), in the main window and among search matches, shows the selected
 file when it is on disk now, that is when its drive is mounted, read-only:
 files up to 5 MiB (the setting `viewer/small_file_mib`, at most a tenth of

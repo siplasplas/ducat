@@ -84,9 +84,9 @@ public:
                 break;
             if (kind == TransferKind::copy)
                 copy_tree(item.source, item.target, item.overwrite);
-            else if (kind == TransferKind::merge)
+            else if (kind == TransferKind::merge && may_merge(item.source, item.target))
                 merge(item.source, item.target);
-            else
+            else if (kind == TransferKind::move)
                 move(item);
         }
         result_.cancelled = progress_.cancel;
@@ -99,6 +99,81 @@ private:
     bool trash(const std::string& path)
     {
         return QFile::moveToTrash(QString::fromStdString(path));
+    }
+
+    // Whether `source` may be merged into `target`: two different folders,
+    // neither inside the other, also through symlinks or bind mounts, as
+    // the source's files that the target has too go to the trash.
+    bool may_merge(const std::string& source, const std::string& target)
+    {
+        struct stat src;
+        struct stat dst;
+        if (stat(source.c_str(), &src) != 0 || !S_ISDIR(src.st_mode)) {
+            fail(source, "not a folder on disk; not merged");
+            return false;
+        }
+        if (stat(target.c_str(), &dst) != 0 || !S_ISDIR(dst.st_mode)) {
+            fail(target, "not a folder on disk; nothing merged into it");
+            return false;
+        }
+        if (src.st_dev == dst.st_dev && src.st_ino == dst.st_ino) {
+            fail(source, "the same folder as " + target + "; not merged");
+            return false;
+        }
+        std::error_code error;
+        const std::string real_source = std::filesystem::canonical(source, error).string();
+        const std::string real_target = std::filesystem::canonical(target, error).string();
+        if (error) {
+            fail(source, "cannot tell where it is: " + error.message() + "; not merged");
+            return false;
+        }
+        const auto inside = [](const std::string& path, const std::string& dir) {
+            return dir == "/" || path.starts_with(dir + "/");
+        };
+        if (real_source == real_target || inside(real_source, real_target)
+            || inside(real_target, real_source)) {
+            fail(source, "lies in " + target + " or the other way round; not merged");
+            return false;
+        }
+        return true;
+    }
+
+    // Puts the newer file `from` in place of the file `to` of the target,
+    // which goes to the trash. The new one is moved next to it first, under
+    // another name, so that a failed move or trashing leaves the target's
+    // file in place; the last step is a rename within the folder.
+    bool replace(const std::string& from, const std::string& to)
+    {
+        const std::size_t slash = to.rfind('/');
+        const std::string folder = to.substr(0, slash);
+        std::string staged;
+        struct stat st;
+        for (int n = 0;; ++n) {
+            staged = join(folder, ".ducat-merge-" + std::to_string(n) + "-" + to.substr(slash + 1));
+            if (lstat(staged.c_str(), &st) != 0)
+                break;
+        }
+        const std::size_t errors = result_.errors.size();
+        move({from, staged, false});
+        if (result_.errors.size() != errors) {
+            unlink(staged.c_str()); // a half copy, if any
+            return false;
+        }
+        if (!trash(to)) {
+            fail(to, "could not be moved to the trash, so the newer file stays in the source");
+            // Back where it was; failing that, it stays under the staged name.
+            const std::size_t back = result_.errors.size();
+            move({staged, from, false});
+            if (result_.errors.size() != back)
+                fail(staged, "the newer file of " + from + " is here");
+            return false;
+        }
+        if (rename(staged.c_str(), to.c_str()) != 0) {
+            fail_errno(to, errno);
+            fail(staged, "the newer file is here; the older one is in the trash");
+            return false;
+        }
+        return true;
     }
 
     // Moves the contents of the folder `source` into the folder `target`
@@ -147,15 +222,7 @@ private:
             const std::int64_t newer = src.st_mtim.tv_sec - dst.st_mtim.tv_sec;
             if (newer > same_time) {
                 // Newer: replaces the target's, which goes to the trash.
-                if (!trash(to)) {
-                    fail(to, "could not be moved to the trash, so the newer file stays in "
-                             "the source");
-                    ++result_.left;
-                    continue;
-                }
-                const std::size_t errors = result_.errors.size();
-                move({from, to, false});
-                if (result_.errors.size() == errors)
+                if (replace(from, to))
                     ++result_.replaced;
                 else
                     ++result_.left;

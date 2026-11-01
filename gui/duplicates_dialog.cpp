@@ -677,6 +677,27 @@ void DuplicatesDialog::merge_folders()
                                     "merge into the other one"));
         return;
     }
+    // Several merges at once must not touch each other: a source that is
+    // another merge's target, or lies in or holds one of its folders, would
+    // change under it or vanish as its source.
+    const auto same_or_inside = [](const std::string& a, const std::string& b) {
+        return a == b || a.starts_with(b + "/") || b.starts_with(a + "/");
+    };
+    for (std::size_t i = 0; i < merges.size(); ++i) {
+        for (std::size_t j = 0; j < merges.size(); ++j) {
+            if (i == j)
+                continue;
+            const std::string& source = merges[i].source.path;
+            if (same_or_inside(source, merges[j].source.path)
+                || same_or_inside(source, merges[j].target.path)) {
+                folders_status_->setText(
+                    tr("%1 is in more than one of the selected merges; merge one pair at a "
+                       "time")
+                        .arg(QString::fromStdString(source)));
+                return;
+            }
+        }
+    }
     QStringList shown;
     std::vector<TransferItem> items;
     for (const Merge& merge : merges) {
