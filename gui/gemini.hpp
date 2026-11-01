@@ -8,7 +8,9 @@
 class QWidget;
 
 // Opens `paths`, directories or files, in gemini-commander: one goes to its
-// current panel, two to its left and right panels. A running one gets them
+// current panel, two to its left and right panels. A directory ending in '/'
+// is entered; one without it is selected in the directory above (by
+// gemini-commander versions that tell the two apart; older ones enter it). A running one gets them
 // over D-Bus (org.freedesktop.Application on
 // io.github.siplasplas.GeminiCommander) and enters each directory, selecting
 // a file in its directory; otherwise the program is started with them. On

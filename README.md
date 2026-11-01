@@ -315,6 +315,12 @@ remove one: the two selected copies of a file, else the current copy and
 another of its group, or the two folders of the current pair. When one of
 the two is not on disk now, neither is opened.
 
+A folder is sent with a trailing `/` where gemini-commander should enter it:
+the selected folder in the main window and the folders of a pair. A matched
+folder in Find goes without it, so that gemini-commander shows the folder
+above with that one selected; gemini-commander versions without this
+distinction enter it either way.
+
 Database… (Ctrl+D) switches to another database file, or names a new one,
 which the first Scan Folder creates; the window title shows the file. The GUI
 starts with the database given by `-d`, else with the one chosen last if it
