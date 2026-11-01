@@ -286,6 +286,18 @@ click adds more. Trashing every copy of a file, or moving or trashing both
 folders of a pair, is asked about once more. Copies moved or trashed leave the
 list, and so do groups left with a single copy and pairs with a folder gone.
 
+Merge Into the Other Folder (Ctrl+M), for folders that are not whole copies,
+moves the contents of the selected folder of a pair into the other one, at
+every depth: what the other lacks is moved there; a file it has too is moved
+there when the selected folder's is newer, the other's going to the trash,
+and goes to the trash itself when it is older or the same (times within 2
+seconds, as FAT keeps them, and the same size). The emptied selected folder
+is removed, so the other one holds the sum, with the newest files. A file of
+the same time but another size, or a file where the other has a folder or
+the other way round, stays where it is, with the folders holding it, and is
+reported. Nothing is deleted for good, and the databases of both folders
+are updated.
+
 View (F3), in the main window and among search matches, shows the selected
 file when it is on disk now, that is when its drive is mounted, read-only:
 files up to 5 MiB (the setting `viewer/small_file_mib`, at most a tenth of

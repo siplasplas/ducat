@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <set>
 #include <tuple>
+#include <unordered_set>
 
 namespace {
 
@@ -250,9 +251,24 @@ QWidget* DuplicatesDialog::make_folders_tab()
                                     "inside a listed pair are left out."),
                                  tab);
 
+    // Merging one folder of a pair into the other.
+    auto* merge = new QPushButton(tr("Merge Into the Other Folder… (Ctrl+M)"), tab);
+    merge->setAutoDefault(false);
+    merge->setToolTip(tr("Move the contents of the selected folder of a pair into the other "
+                         "one: what it lacks is moved, newer files replace older ones, older "
+                         "or the same files go to the trash, and the emptied folder goes"));
+    connect(merge, &QPushButton::clicked, this, &DuplicatesDialog::merge_folders);
+    auto* merge_key = new QShortcut(Qt::CTRL | Qt::Key_M, folders_view_);
+    merge_key->setContext(Qt::WidgetWithChildrenShortcut);
+    connect(merge_key, &QShortcut::activated, this, &DuplicatesDialog::merge_folders);
+    auto* merge_row = new QHBoxLayout;
+    merge_row->addWidget(merge);
+    merge_row->addStretch();
+
     auto* layout = new QVBoxLayout(tab);
     layout->addLayout(options);
     layout->addWidget(folders_view_, 1);
+    layout->addLayout(merge_row);
     layout->addWidget(folders_status_);
     return tab;
 }
@@ -617,6 +633,136 @@ void DuplicatesDialog::open_pair_in_gemini()
         if (status)
             status->setText(message);
     });
+}
+
+void DuplicatesDialog::merge_folders()
+{
+    if (window_.scanning()) {
+        folders_status_->setText(tr("Wait for the scan to end"));
+        return;
+    }
+    // The selected folder of each pair is the source, the other the target.
+    struct Merge {
+        int row;
+        Entry source;
+        Entry target;
+    };
+    std::vector<Merge> merges;
+    std::set<int> rows;
+    for (const QModelIndex& index : folders_view_->selectionModel()->selectedIndexes()) {
+        if (index.column() < 2)
+            continue;
+        const int row = folders_proxy_->mapToSource(index).row();
+        const int column = index.column() >= 5 ? 5 : 2;
+        const auto entry = [&](int c) {
+            const QModelIndex cell = folders_model_->index(row, c);
+            return Entry{cell.data(database_role).toString().toStdString(),
+                         cell.data(path_role).toString().toStdString()};
+        };
+        const bool new_row = rows.insert(row).second;
+        if (!new_row) {
+            const auto same = std::find_if(merges.begin(), merges.end(),
+                                           [&](const Merge& m) { return m.row == row; });
+            if (same != merges.end() && same->source.path != entry(column).path) {
+                folders_status_->setText(tr("Select one folder of a pair, the one to merge into "
+                                            "the other"));
+                return;
+            }
+            continue;
+        }
+        merges.push_back({row, entry(column), entry(7 - column)});
+    }
+    if (merges.empty()) {
+        folders_status_->setText(tr("Select the Folder or Other folder cell of the folder to "
+                                    "merge into the other one"));
+        return;
+    }
+    QStringList shown;
+    std::vector<TransferItem> items;
+    for (const Merge& merge : merges) {
+        const QString source = QString::fromStdString(merge.source.path);
+        const QString target = QString::fromStdString(merge.target.path);
+        if (!QFileInfo(source).isDir() || !QFileInfo(target).isDir()) {
+            folders_status_->setText(
+                tr("%1 or %2 is not on disk now").arg(source, target));
+            return;
+        }
+        if (merge.target.path.starts_with(merge.source.path + "/")
+            || merge.source.path.starts_with(merge.target.path + "/")) {
+            folders_status_->setText(tr("%1 and %2 lie one in the other").arg(source, target));
+            return;
+        }
+        items.push_back({merge.source.path, merge.target.path});
+        if (shown.size() < 10)
+            shown << tr("%1\n    → %2").arg(source, target);
+    }
+    if (merges.size() > 10)
+        shown << tr("… and %n more", nullptr, static_cast<int>(merges.size() - 10));
+    if (!confirm(this, tr("Merge Folders"),
+                 tr("Merge %n folders into the other folders of their pairs?", nullptr,
+                    static_cast<int>(merges.size()))
+                     + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'))
+                     + tr("\n\nWhat the target lacks is moved there; a newer file replaces the "
+                          "target's, which goes to the trash; an older or the same file goes "
+                          "to the trash. Files of the same time but another size stay. The "
+                          "emptied source folder is removed.")))
+        return;
+
+    const TransferResult result = run_transfer(this, TransferKind::merge, items);
+    folders_view_->setFocus();
+
+    // Both folders changed: every database of the pairs, and the shown one,
+    // learns of it.
+    std::set<std::string> databases{window_.database()};
+    std::vector<std::string> changed;
+    for (const Merge& merge : merges) {
+        databases.insert(merge.source.database);
+        databases.insert(merge.target.database);
+        changed.push_back(merge.source.path);
+        changed.push_back(merge.target.path);
+    }
+    for (const std::string& database : databases)
+        window_.update_entries(changed, database);
+    window_.reload_shown();
+
+    // The merged pairs, and pairs with a folder now gone, leave the list.
+    std::unordered_set<std::string> left;
+    for (const Merge& merge : merges) {
+        if (!QFileInfo::exists(QString::fromStdString(merge.source.path)))
+            left.insert(merge.source.path);
+    }
+    const int place = folders_view_->currentIndex().row();
+    const int place_column = std::max(folders_view_->currentIndex().column(), 2);
+    for (int pair = folders_model_->rowCount() - 1; pair >= 0; --pair) {
+        bool drop = rows.count(pair) > 0;
+        for (const int column : {2, 5}) {
+            const std::string path =
+                folders_model_->item(pair, column)->data(path_role).toString().toStdString();
+            drop = drop || has_left(path, left);
+        }
+        if (drop)
+            folders_model_->removeRow(pair);
+    }
+    if (folders_proxy_->rowCount() > 0) {
+        const QModelIndex next = folders_proxy_->index(
+            std::min(std::max(place, 0), folders_proxy_->rowCount() - 1), place_column);
+        folders_view_->setCurrentIndex(next);
+        folders_view_->scrollTo(next);
+    }
+
+    QStringList problems;
+    for (const std::string& error : result.errors)
+        problems << QString::fromStdString(error);
+    QString message = tr("Merged: %1 moved, %2 replaced by newer ones, %3 to the trash as older "
+                         "or the same, %4 left")
+                          .arg(result.moved)
+                          .arg(result.replaced)
+                          .arg(result.trashed)
+                          .arg(result.left);
+    if (result.cancelled)
+        message = tr("Stopped; what was done so far stays. ") + message;
+    folders_status_->setText(message);
+    show_problems(this, tr("Merge Folders"), problems);
 }
 
 void DuplicatesDialog::open_entry(const Entry& entry)

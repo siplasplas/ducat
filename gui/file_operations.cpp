@@ -8,6 +8,7 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QEventLoop>
+#include <QFile>
 #include <QFileInfo>
 #include <QFileSystemModel>
 #include <QHBoxLayout>
@@ -83,6 +84,8 @@ public:
                 break;
             if (kind == TransferKind::copy)
                 copy_tree(item.source, item.target, item.overwrite);
+            else if (kind == TransferKind::merge)
+                merge(item.source, item.target);
             else
                 move(item);
         }
@@ -90,6 +93,91 @@ public:
     }
 
 private:
+    // Times this close count as the same: FAT keeps them to 2 seconds.
+    static constexpr std::int64_t same_time = 2;
+
+    bool trash(const std::string& path)
+    {
+        return QFile::moveToTrash(QString::fromStdString(path));
+    }
+
+    // Moves the contents of the folder `source` into the folder `target`
+    // (see TransferKind::merge).
+    void merge(const std::string& source, const std::string& target)
+    {
+        int error = 0;
+        const std::vector<std::string> names = directory_names(source, error);
+        if (error != 0) {
+            fail_errno(source, error);
+            return;
+        }
+        for (const std::string& name : names) {
+            if (progress_.cancel)
+                return;
+            const std::string from = join(source, name);
+            const std::string to = join(target, name);
+            show(from);
+            struct stat src;
+            if (lstat(from.c_str(), &src) != 0) {
+                fail_errno(from, errno);
+                ++result_.left;
+                continue;
+            }
+            struct stat dst;
+            if (lstat(to.c_str(), &dst) != 0) {
+                // Missing in the target: moved there.
+                const std::size_t errors = result_.errors.size();
+                move({from, to, false});
+                if (result_.errors.size() == errors)
+                    ++result_.moved;
+                else
+                    ++result_.left;
+                continue;
+            }
+            if (S_ISDIR(src.st_mode) && S_ISDIR(dst.st_mode)) {
+                merge(from, to);
+                continue;
+            }
+            if (S_ISDIR(src.st_mode) != S_ISDIR(dst.st_mode)) {
+                fail(from, S_ISDIR(src.st_mode) ? "the target has a file of this name; left"
+                                                : "the target has a folder of this name; left");
+                ++result_.left;
+                continue;
+            }
+            const std::int64_t newer = src.st_mtim.tv_sec - dst.st_mtim.tv_sec;
+            if (newer > same_time) {
+                // Newer: replaces the target's, which goes to the trash.
+                if (!trash(to)) {
+                    fail(to, "could not be moved to the trash, so the newer file stays in "
+                             "the source");
+                    ++result_.left;
+                    continue;
+                }
+                const std::size_t errors = result_.errors.size();
+                move({from, to, false});
+                if (result_.errors.size() == errors)
+                    ++result_.replaced;
+                else
+                    ++result_.left;
+            } else if (newer < -same_time || src.st_size == dst.st_size) {
+                // Older, or the same: the target keeps its own.
+                const std::uint64_t size = count(from);
+                if (trash(from)) {
+                    progress_.done += size;
+                    ++result_.trashed;
+                } else {
+                    fail(from, "could not be moved to the trash; left");
+                    ++result_.left;
+                }
+            } else {
+                fail(from, "the same time as in the target but another size; left");
+                ++result_.left;
+            }
+        }
+        // Emptied: removed; a folder still holding something left stays.
+        if (rmdir(source.c_str()) != 0 && errno != ENOTEMPTY && errno != EEXIST)
+            fail_errno(source, errno);
+    }
     std::uint64_t count(const std::string& path)
     {
         struct stat st;
@@ -432,8 +520,9 @@ TransferResult run_transfer(QWidget* parent, TransferKind kind, const std::vecto
     });
 
     QProgressDialog dialog(parent);
-    dialog.setWindowTitle(kind == TransferKind::copy ? QObject::tr("Copying")
-                                                     : QObject::tr("Moving"));
+    dialog.setWindowTitle(kind == TransferKind::copy    ? QObject::tr("Copying")
+                          : kind == TransferKind::merge ? QObject::tr("Merging")
+                                                        : QObject::tr("Moving"));
     dialog.setWindowModality(Qt::WindowModal);
     dialog.setAutoReset(false);
     dialog.setAutoClose(false);

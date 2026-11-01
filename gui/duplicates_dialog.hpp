@@ -66,6 +66,9 @@ private:
     // Ctrl+Shift+G: two copies, or the folders of a pair, in the left and
     // right panels of gemini-commander.
     void open_pair_in_gemini();
+    // Ctrl+M: merges each selected folder of a pair into the other one (see
+    // TransferKind::merge).
+    void merge_folders();
     void view_entry(const Entry& entry);
 
     MainWindow& window_;
