@@ -598,17 +598,14 @@ void DuplicatesDialog::open_pair_in_gemini()
             }
         }
     } else {
-        // The two folders of the current pair, entered ('/') to compare them.
+        // The two folders of the current pair, selected in the folders above
+        // them (no trailing '/'), as matches of Find are.
         const QModelIndex current = folders_view_->currentIndex();
         if (current.isValid()) {
             const int row = folders_proxy_->mapToSource(current).row();
-            for (const int column : {2, 5}) {
-                std::string path =
-                    folders_model_->index(row, column).data(path_role).toString().toStdString();
-                if (path != "/")
-                    path += '/';
-                paths.push_back(path);
-            }
+            for (const int column : {2, 5})
+                paths.push_back(
+                    folders_model_->index(row, column).data(path_role).toString().toStdString());
         }
     }
     QPointer<QLabel> status = files ? files_status_ : folders_status_;
