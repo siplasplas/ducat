@@ -524,12 +524,14 @@ void DuplicatesDialog::operate(EntryOperation operation)
                 return;
             std::set<std::string> kept;
             for (const std::vector<std::string>& paths : whole) {
-                // The shortest path; among equal lengths the first listed.
+                // The shortest path; among equal lengths the one first in
+                // lexicographic order.
                 auto keep = paths.begin();
                 if (box.clickedButton() == shortest) {
                     keep = std::min_element(paths.begin(), paths.end(),
                                             [](const std::string& a, const std::string& b) {
-                                                return a.size() < b.size();
+                                                return a.size() != b.size() ? a.size() < b.size()
+                                                                            : a < b;
                                             });
                 }
                 kept.insert(*keep);

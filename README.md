@@ -284,7 +284,8 @@ selected: the Folder cell (or its Files and Disk usage) chooses the first
 folder of a pair, the Other folder cell the second, and Ctrl or Shift with a
 click adds more. Trashing never takes every copy of a file: when all copies
 of some files are selected, it asks which one of each stays, the first
-listed (Enter) or the one with the shortest path, or cancels (Escape).
+listed (Enter) or the one with the shortest path, of equal lengths the one
+first in lexicographic order, or cancels (Escape).
 Moving or trashing both folders of a pair is asked about once more. Copies moved or trashed leave the
 list, and so do groups left with a single copy and pairs with a folder gone.
 
