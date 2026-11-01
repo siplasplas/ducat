@@ -79,7 +79,7 @@ std::string parent_of(const std::string& path)
 } // namespace
 
 SearchDialog::SearchDialog(MainWindow& window)
-    : QDialog(&window), window_(window), type_(new QComboBox(this)),
+    : QDialog(nullptr), window_(window), type_(new QComboBox(this)),
       name_(line_edit(this, tr("e.g. *.log or report*"))),
       extensions_(line_edit(this, tr("e.g. jpg, png"))),
       min_size_(line_edit(this, tr("e.g. 500M"))), max_size_(line_edit(this, tr("e.g. 2G"))),
@@ -94,6 +94,10 @@ SearchDialog::SearchDialog(MainWindow& window)
       model_(new DirectoryModel(this)), view_(new QTreeView(this))
 {
     setWindowTitle(tr("Find – ducat"));
+    // A window of its own, not kept above the main window (which a parent
+    // would make it); the main window deletes it, and closing that one ends
+    // the program while this is open.
+    setAttribute(Qt::WA_QuitOnClose, false);
 
     type_->addItem(tr("Files and folders"));
     type_->addItem(tr("Files"));

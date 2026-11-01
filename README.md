@@ -270,7 +270,13 @@ name and size, listed in groups with
 their copies, and folders sharing most of their files, listed in pairs that
 can be sorted by any column. Enter or a double click shows a copy, or the
 folder of the clicked half of a pair, in the main window; F3 views a copy. At
-most 10,000 groups or pairs are listed, the largest first.
+most 10,000 groups or pairs are listed, the largest first. The share of files
+folders must have in common is kept in the settings, 100 % (whole copies)
+until changed; `ducat dups --dirs` uses 80 % unless `--threshold` says else.
+
+The Find and Duplicates windows are windows of their own: they come to the
+front when opened, but do not stay above the main window, and closing the
+main window ends the program.
 
 Copy (F5), Move (F6) and Move to Trash (F8) work there as among search
 matches, on the selected copies of files, or on the folders whose cells are

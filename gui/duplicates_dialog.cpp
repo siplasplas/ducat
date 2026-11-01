@@ -13,6 +13,7 @@
 #include <QCheckBox>
 #include <QFileInfo>
 #include <QPointer>
+#include <QSettings>
 #include <QFont>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -98,10 +99,12 @@ std::pair<std::string, std::string> split(const std::string& path)
 } // namespace
 
 DuplicatesDialog::DuplicatesDialog(MainWindow& window)
-    : QDialog(&window), window_(window), scope_(new ScopeSelector(window, this)),
+    : QDialog(nullptr), window_(window), scope_(new ScopeSelector(window, this)),
       tabs_(new QTabWidget(this))
 {
     setWindowTitle(tr("Duplicates – ducat"));
+    // A window of its own, as the Find window.
+    setAttribute(Qt::WA_QuitOnClose, false);
     tabs_->addTab(make_files_tab(), tr("Files"));
     tabs_->addTab(make_folders_tab(), tr("Folders"));
 
@@ -198,7 +201,11 @@ QWidget* DuplicatesDialog::make_folders_tab()
     auto* tab = new QWidget(this);
     threshold_ = new QSpinBox(tab);
     threshold_->setRange(1, 100);
-    threshold_->setValue(80);
+    // Kept in the settings; whole copies by default.
+    const QString threshold_key = QStringLiteral("duplicates/threshold");
+    threshold_->setValue(QSettings().value(threshold_key, 100).toInt());
+    connect(threshold_, &QSpinBox::valueChanged, this,
+            [threshold_key](int value) { QSettings().setValue(threshold_key, value); });
     threshold_->setSuffix(QStringLiteral(" %"));
     threshold_->setToolTip(tr("Files shared, of the files below the folder with more of them; "
                               "subfolders of the same names count with their files"));

@@ -268,6 +268,10 @@ MainWindow::MainWindow(std::string database, QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    // The Find and Duplicates windows have no parent, so as not to stay
+    // above this one, and use this window.
+    delete search_dialog_;
+    delete duplicates_dialog_;
     // Stop a running scan; the database write, if already started, is short.
     // A result posted by the thread is dropped with this object.
     if (scan_thread_.joinable()) {
