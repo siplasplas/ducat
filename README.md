@@ -300,6 +300,13 @@ is started; the setting `gemini/command` names another program. On Wayland an
 xdg-activation token, which Qt gives only through its private API
 (`qt6-base-private-dev` at build time), lets its window come to the front.
 
+Ctrl+Shift+G, also in the list's context menu, works among search matches
+too, for the current match in gemini-commander's current panel, and among
+duplicates for two at once, in its left and right panels, to compare them or
+remove one: the two selected copies of a file, else the current copy and
+another of its group, or the two folders of the current pair. When one of
+the two is not on disk now, neither is opened.
+
 Database… (Ctrl+D) switches to another database file, or names a new one,
 which the first Scan Folder creates; the window title shows the file. The GUI
 starts with the database given by `-d`, else with the one chosen last if it

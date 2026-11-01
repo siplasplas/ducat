@@ -402,30 +402,29 @@ void MainWindow::open_in_gemini_commander()
     const std::string path =
         index.isValid() ? ducat::join_path(current_, model_->entry(index.row()).name) : current_;
 
-    // An entry in an archive is not on disk; the archive above it is.
-    QString target = to_qstring(path);
-    if (!QFileInfo::exists(target)) {
-        target.clear();
-        for (std::string up = path; up != "/";) {
-            up = parent_of(up);
-            const QFileInfo info(to_qstring(up));
-            if (info.exists()) {
-                if (info.isFile())
-                    target = info.filePath();
-                break;
-            }
-        }
+    open_paths_in_gemini({path});
+}
+
+void MainWindow::open_paths_in_gemini(const std::vector<std::string>& paths, QWidget* parent,
+                                      std::function<void(const QString& message)> report)
+{
+    if (!report)
+        report = [this](const QString& message) { statusBar()->showMessage(message); };
+    // Both must be on disk; one alone would leave the other panel as it was.
+    QStringList targets;
+    for (const std::string& path : paths) {
+        QString error;
+        const QString target = gemini_target(to_qstring(path), error);
         if (target.isEmpty()) {
-            show_error(tr("%1 is not on disk now: its drive is not mounted, or it is gone")
-                           .arg(to_qstring(path)));
+            report(error);
             return;
         }
+        targets << target;
     }
-    open_in_gemini(this, target, [this, target](const QString& error) {
-        if (error.isEmpty())
-            statusBar()->showMessage(tr("Opened %1 in gemini-commander").arg(target));
-        else
-            show_error(error);
+    open_in_gemini(parent ? parent : this, targets, [targets, report](const QString& error) {
+        report(error.isEmpty() ? tr("Opened %1 in gemini-commander")
+                                     .arg(targets.join(QStringLiteral(" | ")))
+                               : error);
     });
 }
 

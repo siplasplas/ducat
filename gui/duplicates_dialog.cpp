@@ -8,9 +8,11 @@
 #include "ducat/duplicates.hpp"
 #include "ducat/format.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QFileInfo>
+#include <QPointer>
 #include <QFont>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -81,8 +83,9 @@ QTreeView* make_view(QWidget* parent, QAbstractItemModel* model)
     view->setAllColumnsShowFocus(true);
     view->setEditTriggers(QAbstractItemView::NoEditTriggers);
     view->setToolTip(QObject::tr("Enter or a double click shows the entry in the main window, "
-                                 "F3 shows a file when its drive is mounted; F5, F6 and F8 "
-                                 "copy, move or trash the selected entries"));
+                                 "F3 shows a file when its drive is mounted, Ctrl+Shift+G "
+                                 "opens two copies or a pair in gemini-commander; F5, F6 and "
+                                 "F8 copy, move or trash the selected entries"));
     return view;
 }
 
@@ -138,6 +141,18 @@ DuplicatesDialog::DuplicatesDialog(MainWindow& window)
             if (!entry.path.empty())
                 view_entry(entry);
         });
+        // Two copies, or the two folders of a pair, side by side.
+        auto* separator = new QAction(view);
+        separator->setSeparator(true);
+        view->addAction(separator);
+        auto* gemini = new QAction(tr("Open Both in &gemini-commander"), view);
+        gemini->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_G);
+        gemini->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        gemini->setToolTip(tr("The two selected copies, or the current copy and another, or "
+                              "the two folders of the current pair, in the left and right "
+                              "panels"));
+        connect(gemini, &QAction::triggered, this, &DuplicatesDialog::open_pair_in_gemini);
+        view->addAction(gemini);
     }
 
     resize(1000, 750);
@@ -548,6 +563,54 @@ void DuplicatesDialog::operate(EntryOperation operation)
         }
         folders_status_->setText(outcome.message);
     }
+}
+
+void DuplicatesDialog::open_pair_in_gemini()
+{
+    const bool files = tabs_->currentIndex() == 0;
+    std::vector<std::string> paths;
+    if (files) {
+        // Two selected copies; else the current copy and another of its
+        // group, or the first two copies of the current group.
+        for (const QModelIndex& index : files_view_->selectionModel()->selectedRows()) {
+            const Entry entry = entry_at(index);
+            if (!entry.path.empty())
+                paths.push_back(entry.path);
+        }
+        if (paths.size() != 2) {
+            paths.clear();
+            const QModelIndex current = files_view_->currentIndex().siblingAtColumn(0);
+            const QModelIndex group = current.parent().isValid() ? current.parent() : current;
+            const int copies = files_model_->rowCount(group);
+            if (current.isValid() && copies >= 2) {
+                const int first = current.parent().isValid() ? current.row() : 0;
+                const int second = first + 1 < copies ? first + 1 : first - 1;
+                for (const int row : {first, second})
+                    paths.push_back(
+                        files_model_->index(row, 0, group).data(path_role).toString().toStdString());
+            }
+        }
+    } else {
+        // The two folders of the current pair.
+        const QModelIndex current = folders_view_->currentIndex();
+        if (current.isValid()) {
+            const int row = folders_proxy_->mapToSource(current).row();
+            for (const int column : {2, 5})
+                paths.push_back(folders_model_->index(row, column)
+                                    .data(path_role)
+                                    .toString()
+                                    .toStdString());
+        }
+    }
+    QPointer<QLabel> status = files ? files_status_ : folders_status_;
+    if (paths.size() != 2) {
+        status->setText(tr("Select a copy, or two, to open in gemini-commander"));
+        return;
+    }
+    window_.open_paths_in_gemini(paths, this, [status](const QString& message) {
+        if (status)
+            status->setText(message);
+    });
 }
 
 void DuplicatesDialog::open_entry(const Entry& entry)

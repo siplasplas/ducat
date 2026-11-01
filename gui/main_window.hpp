@@ -100,6 +100,14 @@ public:
     // Reads the shown directory again, keeping the selected entry.
     void reload_shown();
 
+    // Opens one stored path in gemini-commander's current panel, or two in
+    // its left and right panels, when they are on disk (an entry in an
+    // archive stands for the archive); else explains in the status bar.
+    // `parent` is the window the user works in, for the activation token;
+    // `report` shows the outcome there, by default in the status bar.
+    void open_paths_in_gemini(const std::vector<std::string>& paths, QWidget* parent = nullptr,
+                              std::function<void(const QString& message)> report = {});
+
     // Whether a scan runs, writing the shown database.
     bool scanning() const { return scan_thread_.joinable(); }
 

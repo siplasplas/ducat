@@ -63,6 +63,9 @@ private:
     void open_entry(const Entry& entry);
     // F5, F6, F8 on the selected copies or folders.
     void operate(EntryOperation operation);
+    // Ctrl+Shift+G: two copies, or the folders of a pair, in the left and
+    // right panels of gemini-commander.
+    void open_pair_in_gemini();
     void view_entry(const Entry& entry);
 
     MainWindow& window_;

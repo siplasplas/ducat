@@ -5,6 +5,7 @@
 #include <QDBusMessage>
 #include <QDBusPendingCallWatcher>
 #include <QDBusPendingReply>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QProcess>
 #include <QSettings>
@@ -61,12 +62,13 @@ void request_activation_token(QWidget* window, const std::function<void(const QS
     done(QString());
 }
 
-// Starts gemini-commander with `path`, handing it `token`.
-QString start(const QString& program, const QString& path, const QString& token)
+// Starts gemini-commander with `paths`, its left and right panels, handing it
+// `token`.
+QString start(const QString& program, const QStringList& paths, const QString& token)
 {
     QProcess process;
     process.setProgram(program);
-    process.setArguments({path});
+    process.setArguments(paths);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
     environment.remove(QStringLiteral("DESKTOP_STARTUP_ID"));
     if (token.isEmpty())
@@ -80,7 +82,27 @@ QString start(const QString& program, const QString& path, const QString& token)
 
 } // namespace
 
-void open_in_gemini(QWidget* window, const QString& path,
+QString gemini_target(const QString& path, QString& error)
+{
+    if (QFileInfo::exists(path))
+        return path;
+    // An entry in an archive is not on disk; the archive above it is.
+    for (QString up = path; up != QLatin1String("/");) {
+        const int slash = up.lastIndexOf(QLatin1Char('/'));
+        up = slash <= 0 ? QStringLiteral("/") : up.left(slash);
+        const QFileInfo info(up);
+        if (info.exists()) {
+            if (info.isFile())
+                return info.filePath();
+            break;
+        }
+    }
+    error = QObject::tr("%1 is not on disk now: its drive is not mounted, or it is gone")
+                .arg(path);
+    return {};
+}
+
+void open_in_gemini(QWidget* window, const QStringList& paths,
                     const std::function<void(const QString& error)>& done)
 {
     QDBusConnection bus = QDBusConnection::sessionBus();
@@ -100,17 +122,19 @@ void open_in_gemini(QWidget* window, const QString& path,
 
     request_activation_token(window, [=](const QString& token) {
         if (!running) {
-            done(start(program, path, token));
+            done(start(program, paths, token));
             return;
         }
+        QStringList uris;
+        for (const QString& path : paths)
+            uris << QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded);
         QDBusMessage call = QDBusMessage::createMethodCall(
             QString::fromLatin1(service), QString::fromLatin1(object_path),
             QStringLiteral("org.freedesktop.Application"), QStringLiteral("Open"));
         QVariantMap platform_data;
         if (!token.isEmpty())
             platform_data.insert(QStringLiteral("activation-token"), token);
-        call << QStringList{QUrl::fromLocalFile(path).toString(QUrl::FullyEncoded)}
-             << platform_data;
+        call << uris << platform_data;
         auto* watcher = new QDBusPendingCallWatcher(bus.asyncCall(call, 5000), window);
         QObject::connect(watcher, &QDBusPendingCallWatcher::finished, window,
                          [=](QDBusPendingCallWatcher* finished) {
@@ -121,7 +145,7 @@ void open_in_gemini(QWidget* window, const QString& path,
                              }
                              // E.g. a hung instance: a new one uses the token.
                              if (!program.isEmpty())
-                                 done(start(program, path, token));
+                                 done(start(program, paths, token));
                              else
                                  done(finished->error().message());
                          });

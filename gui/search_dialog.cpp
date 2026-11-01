@@ -9,6 +9,7 @@
 #include "ducat/path.hpp"
 #include "ducat/search.hpp"
 
+#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
@@ -19,6 +20,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QLocale>
+#include <QPointer>
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QShortcut>
@@ -137,8 +139,9 @@ SearchDialog::SearchDialog(MainWindow& window)
     make_columns_resizable(view_, {DirectoryModel::Name, DirectoryModel::Folder});
     add_copy_menu(view_);
     view_->setToolTip(tr("Enter or a double click shows the entry in the main window, "
-                         "F3 shows a file when its drive is mounted, F4 edits it; F5, F6 "
-                         "and F8 copy, move or trash the selected matches"));
+                         "F3 shows a file when its drive is mounted, F4 edits it, "
+                         "Ctrl+Shift+G opens it in gemini-commander; F5, F6 and F8 copy, "
+                         "move or trash the selected matches"));
     connect(view_, &QTreeView::activated, this, &SearchDialog::open_result);
     auto* view_file = new QShortcut(Qt::Key_F3, view_);
     view_file->setContext(Qt::WidgetWithChildrenShortcut);
@@ -155,6 +158,27 @@ SearchDialog::SearchDialog(MainWindow& window)
             window_.edit_file(model_->folder(index.row()), model_->entry(index.row()),
                               model_->database(index.row()));
     });
+
+    // The current match in gemini-commander's current panel.
+    auto* separator = new QAction(view_);
+    separator->setSeparator(true);
+    view_->addAction(separator);
+    auto* gemini = new QAction(tr("Open in &gemini-commander"), view_);
+    gemini->setShortcut(Qt::CTRL | Qt::SHIFT | Qt::Key_G);
+    gemini->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(gemini, &QAction::triggered, this, [this] {
+        const QModelIndex index = view_->currentIndex();
+        if (!index.isValid())
+            return;
+        QPointer<QLabel> status = status_;
+        window_.open_paths_in_gemini(
+            {ducat::join_path(model_->folder(index.row()), model_->entry(index.row()).name)},
+            this, [status](const QString& message) {
+                if (status)
+                    status->setText(message);
+            });
+    });
+    view_->addAction(gemini);
 
     // File operations on the selected matches; Ctrl+A selects them all.
     view_->setSelectionMode(QAbstractItemView::ExtendedSelection);
