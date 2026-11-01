@@ -11,14 +11,14 @@ class QWidget;
 // Copying and moving files for the GUI, with a progress dialog that can stop
 // the work between files or blocks.
 
-// A merge moves the contents of a source folder into a target folder: what
-// the target lacks is moved there; a file the target has too is moved there
-// when the source's is newer, the target's going to the trash, and goes to
-// the trash itself when it is older or the same (times within 2 seconds,
-// as FAT keeps them, and the same size); folders of the same name are merged
-// in turn. A file whose time is the same but size is not, or a file where
-// the target has a folder or the other way round, stays, as do the folders
-// holding it; the emptied folders of the source are removed.
+// A merge moves the contents of a source folder into a target folder, never
+// overwriting anything there: what the target lacks is moved there; a file
+// the target has too, the same size and time (within 2 seconds, as FAT keeps
+// them), goes from the source to the trash; folders of the same name are
+// merged in turn. Any other file the target has too (newer, older, another
+// size), or a file where the target has a folder or the other way round,
+// stays, as do the folders holding it; the emptied folders of the source
+// are removed.
 enum class TransferKind { copy, move, merge };
 
 struct TransferItem {
@@ -30,11 +30,9 @@ struct TransferItem {
 struct TransferResult {
     std::vector<std::string> errors;   // "path: reason"
     bool cancelled = false;
-    // Of a merge: entries moved to the target, files of the target replaced
-    // by newer ones, files of the source trashed as older or the same, and
-    // entries left in the source.
+    // Of a merge: entries moved to the target, files of the source trashed
+    // as the same as the target's, and entries left in the source.
     std::size_t moved = 0;
-    std::size_t replaced = 0;
     std::size_t trashed = 0;
     std::size_t left = 0;
 };

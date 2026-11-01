@@ -138,44 +138,6 @@ private:
         return true;
     }
 
-    // Puts the newer file `from` in place of the file `to` of the target,
-    // which goes to the trash. The new one is moved next to it first, under
-    // another name, so that a failed move or trashing leaves the target's
-    // file in place; the last step is a rename within the folder.
-    bool replace(const std::string& from, const std::string& to)
-    {
-        const std::size_t slash = to.rfind('/');
-        const std::string folder = to.substr(0, slash);
-        std::string staged;
-        struct stat st;
-        for (int n = 0;; ++n) {
-            staged = join(folder, ".ducat-merge-" + std::to_string(n) + "-" + to.substr(slash + 1));
-            if (lstat(staged.c_str(), &st) != 0)
-                break;
-        }
-        const std::size_t errors = result_.errors.size();
-        move({from, staged, false});
-        if (result_.errors.size() != errors) {
-            unlink(staged.c_str()); // a half copy, if any
-            return false;
-        }
-        if (!trash(to)) {
-            fail(to, "could not be moved to the trash, so the newer file stays in the source");
-            // Back where it was; failing that, it stays under the staged name.
-            const std::size_t back = result_.errors.size();
-            move({staged, from, false});
-            if (result_.errors.size() != back)
-                fail(staged, "the newer file of " + from + " is here");
-            return false;
-        }
-        if (rename(staged.c_str(), to.c_str()) != 0) {
-            fail_errno(to, errno);
-            fail(staged, "the newer file is here; the older one is in the trash");
-            return false;
-        }
-        return true;
-    }
-
     // Moves the contents of the folder `source` into the folder `target`
     // (see TransferKind::merge).
     void merge(const std::string& source, const std::string& target)
@@ -219,27 +181,27 @@ private:
                 ++result_.left;
                 continue;
             }
+            // The target's file is never overwritten: only a copy of it, the
+            // same size and time, goes from the source, to the trash.
             const std::int64_t newer = src.st_mtim.tv_sec - dst.st_mtim.tv_sec;
-            if (newer > same_time) {
-                // Newer: replaces the target's, which goes to the trash.
-                if (replace(from, to))
-                    ++result_.replaced;
-                else
-                    ++result_.left;
-            } else if (newer < -same_time || src.st_size == dst.st_size) {
-                // Older, or the same: the target keeps its own.
+            const bool same_size = src.st_size == dst.st_size;
+            if (same_size && newer <= same_time && newer >= -same_time) {
                 const std::uint64_t size = count(from);
                 if (trash(from)) {
                     progress_.done += size;
                     ++result_.trashed;
                 } else {
-                    fail(from, "could not be moved to the trash; left");
+                    fail(from, "the same as in the target, but could not be moved to the "
+                               "trash; left");
                     ++result_.left;
                 }
-            } else {
-                fail(from, "the same time as in the target but another size; left");
-                ++result_.left;
+                continue;
             }
+            fail(from, !same_size && newer <= same_time && newer >= -same_time
+                           ? "another size than in the target, the same time; left"
+                       : newer > same_time ? "newer than in the target; left"
+                                           : "older than in the target; left");
+            ++result_.left;
         }
         // Emptied: removed; a folder still holding something left stays.
         if (rmdir(source.c_str()) != 0 && errno != ENOTEMPTY && errno != EEXIST)

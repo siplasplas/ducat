@@ -254,9 +254,10 @@ QWidget* DuplicatesDialog::make_folders_tab()
     // Merging one folder of a pair into the other.
     auto* merge = new QPushButton(tr("Merge Into the Other Folder… (Ctrl+M)"), tab);
     merge->setAutoDefault(false);
-    merge->setToolTip(tr("Move the contents of the selected folder of a pair into the other "
-                         "one: what it lacks is moved, newer files replace older ones, older "
-                         "or the same files go to the trash, and the emptied folder goes"));
+    merge->setToolTip(tr("Move the contents of the selected folder of each selected pair into "
+                         "the other one, pair after pair: what it lacks is moved, files the "
+                         "same as its own go to the trash, nothing is overwritten, and the "
+                         "emptied folder goes"));
     connect(merge, &QPushButton::clicked, this, &DuplicatesDialog::merge_folders);
     auto* merge_key = new QShortcut(Qt::CTRL | Qt::Key_M, folders_view_);
     merge_key->setContext(Qt::WidgetWithChildrenShortcut);
@@ -677,42 +678,18 @@ void DuplicatesDialog::merge_folders()
                                     "merge into the other one"));
         return;
     }
-    // Several merges at once must not touch each other: a source that is
-    // another merge's target, or lies in or holds one of its folders, would
-    // change under it or vanish as its source.
-    const auto same_or_inside = [](const std::string& a, const std::string& b) {
-        return a == b || a.starts_with(b + "/") || b.starts_with(a + "/");
-    };
-    for (std::size_t i = 0; i < merges.size(); ++i) {
-        for (std::size_t j = 0; j < merges.size(); ++j) {
-            if (i == j)
-                continue;
-            const std::string& source = merges[i].source.path;
-            if (same_or_inside(source, merges[j].source.path)
-                || same_or_inside(source, merges[j].target.path)) {
-                folders_status_->setText(
-                    tr("%1 is in more than one of the selected merges; merge one pair at a "
-                       "time")
-                        .arg(QString::fromStdString(source)));
-                return;
-            }
-        }
-    }
+    // The rows are merged one after another, in the order shown; one whose
+    // folder an earlier merge took away is skipped and reported (each merge
+    // checks its folders when its turn comes).
+    std::sort(merges.begin(), merges.end(), [&](const Merge& a, const Merge& b) {
+        return folders_proxy_->mapFromSource(folders_model_->index(a.row, 0)).row()
+             < folders_proxy_->mapFromSource(folders_model_->index(b.row, 0)).row();
+    });
     QStringList shown;
     std::vector<TransferItem> items;
     for (const Merge& merge : merges) {
         const QString source = QString::fromStdString(merge.source.path);
         const QString target = QString::fromStdString(merge.target.path);
-        if (!QFileInfo(source).isDir() || !QFileInfo(target).isDir()) {
-            folders_status_->setText(
-                tr("%1 or %2 is not on disk now").arg(source, target));
-            return;
-        }
-        if (merge.target.path.starts_with(merge.source.path + "/")
-            || merge.source.path.starts_with(merge.target.path + "/")) {
-            folders_status_->setText(tr("%1 and %2 lie one in the other").arg(source, target));
-            return;
-        }
         items.push_back({merge.source.path, merge.target.path});
         if (shown.size() < 10)
             shown << tr("%1\n    → %2").arg(source, target);
@@ -723,10 +700,10 @@ void DuplicatesDialog::merge_folders()
                  tr("Merge %n folders into the other folders of their pairs?", nullptr,
                     static_cast<int>(merges.size()))
                      + QStringLiteral("\n\n") + shown.join(QLatin1Char('\n'))
-                     + tr("\n\nWhat the target lacks is moved there; a newer file replaces the "
-                          "target's, which goes to the trash; an older or the same file goes "
-                          "to the trash. Files of the same time but another size stay. The "
-                          "emptied source folder is removed.")))
+                     + tr("\n\nWhat the target lacks is moved there; files the same as the "
+                          "target's (size and time) go to the trash. Nothing in the target "
+                          "is overwritten: files that differ from the target's stay and are "
+                          "listed at the end. An emptied source folder is removed.")))
         return;
 
     const TransferResult result = run_transfer(this, TransferKind::merge, items);
@@ -746,7 +723,8 @@ void DuplicatesDialog::merge_folders()
         window_.update_entries(changed, database);
     window_.reload_shown();
 
-    // The merged pairs, and pairs with a folder now gone, leave the list.
+    // Pairs with a folder now gone leave the list; a merge that left files
+    // keeps its pair, to look at what differs.
     std::unordered_set<std::string> left;
     for (const Merge& merge : merges) {
         if (!QFileInfo::exists(QString::fromStdString(merge.source.path)))
@@ -755,7 +733,7 @@ void DuplicatesDialog::merge_folders()
     const int place = folders_view_->currentIndex().row();
     const int place_column = std::max(folders_view_->currentIndex().column(), 2);
     for (int pair = folders_model_->rowCount() - 1; pair >= 0; --pair) {
-        bool drop = rows.count(pair) > 0;
+        bool drop = false;
         for (const int column : {2, 5}) {
             const std::string path =
                 folders_model_->item(pair, column)->data(path_role).toString().toStdString();
@@ -774,16 +752,31 @@ void DuplicatesDialog::merge_folders()
     QStringList problems;
     for (const std::string& error : result.errors)
         problems << QString::fromStdString(error);
-    QString message = tr("Merged: %1 moved, %2 replaced by newer ones, %3 to the trash as older "
-                         "or the same, %4 left")
+    QString message = tr("Merged %n folders: %1 moved, %2 to the trash as the same as the "
+                         "target's, %3 left in the source",
+                         nullptr, static_cast<int>(merges.size()))
                           .arg(result.moved)
-                          .arg(result.replaced)
                           .arg(result.trashed)
                           .arg(result.left);
     if (result.cancelled)
         message = tr("Stopped; what was done so far stays. ") + message;
     folders_status_->setText(message);
-    show_problems(this, tr("Merge Folders"), problems);
+    // At the end, what could not be merged: e.g. a file of the same name
+    // but another size, which is not overwritten.
+    if (!problems.isEmpty()) {
+        QMessageBox box(QMessageBox::Warning, tr("Merge Folders"),
+                        problems.size() == 1
+                            ? tr("One entry could not be merged and stays in its source "
+                                 "folder.")
+                            : tr("%1 entries could not be merged and stay in the source "
+                                 "folders.")
+                                  .arg(problems.size()),
+                        QMessageBox::Ok, this);
+        box.setInformativeText(problems.mid(0, 8).join(QLatin1Char('\n'))
+                               + (problems.size() > 8 ? QStringLiteral("\n…") : QString()));
+        box.setDetailedText(problems.join(QLatin1Char('\n')));
+        box.exec();
+    }
 }
 
 void DuplicatesDialog::open_entry(const Entry& entry)

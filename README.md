@@ -288,22 +288,21 @@ list, and so do groups left with a single copy and pairs with a folder gone.
 
 Merge Into the Other Folder (Ctrl+M), for folders that are not whole copies,
 moves the contents of the selected folder of a pair into the other one, at
-every depth: what the other lacks is moved there; a file it has too is moved
-there when the selected folder's is newer, the other's going to the trash,
-and goes to the trash itself when it is older or the same (times within 2
-seconds, as FAT keeps them, and the same size). The emptied selected folder
-is removed, so the other one holds the sum, with the newest files. A file of
-the same time but another size, or a file where the other has a folder or
-the other way round, stays where it is, with the folders holding it, and is
-reported. Nothing is deleted for good, and the databases of both folders
-are updated.
+every depth, and of each selected pair one after another: what the other
+lacks is moved there, and a file it has too, the same size and time (within
+2 seconds, as FAT keeps them), goes from the selected folder to the trash.
+Nothing in the other folder is ever overwritten: any other file it has too,
+newer, older or of another size, or a file where it has a folder or the
+other way round, stays in the selected folder, with the folders holding it,
+and a warning lists them at the end. The emptied selected folder is removed,
+so the other one holds the sum. Nothing is deleted for good, and the
+databases of both folders are updated; a pair whose folder stays, with what
+could not be merged, stays in the list.
 
-Merging never loses a file of the other folder: a newer file is put next to
-the one it replaces, under another name, before that one goes to the trash,
-so a failed copy or trash leaves the old file in place; without a usable
-trash nothing is replaced or thrown away. The same folder reached through a
-symlink or a bind mount, folders one inside the other, and selected merges
-that share a folder are refused. The test `merge` checks these cases.
+The same folder reached through a symlink or a bind mount, and folders one
+inside the other, are not merged; a merge whose folder an earlier one of the
+same run took away is skipped and reported. The test `merge` checks that the
+other folder keeps every file, also when the trash, writing or copying fails.
 
 View (F3), in the main window and among search matches, shows the selected
 file when it is on disk now, that is when its drive is mounted, read-only:

@@ -1,5 +1,6 @@
 // Merging a folder into another (TransferKind::merge in the GUI's file
-// operations): nothing of the target may get lost, whatever goes wrong.
+// operations): nothing of the target may change or get lost, whatever goes
+// wrong; it only gains what it lacked.
 
 #include "check.hpp"
 
@@ -87,9 +88,9 @@ Files snapshot(const fs::path& dir)
     return files;
 }
 
-// Every file the target had is still there, with its old contents or, for
-// those in `replaced`, the source's newer ones; no staged file is left.
-void check_target_kept(const fs::path& target, const Files& before, const Files& replaced = {})
+// Every file the target had is still there with the same contents; it may
+// only have gained files.
+void check_target_kept(const fs::path& target, const Files& before)
 {
     CHECK(fs::is_directory(target));
     const Files after = snapshot(target);
@@ -100,11 +101,8 @@ void check_target_kept(const fs::path& target, const Files& before, const Files&
             std::cerr << "    lost: " << path << '\n';
             continue;
         }
-        const auto newer = replaced.find(path);
-        CHECK_EQ(found->second, newer == replaced.end() ? text : newer->second);
+        CHECK_EQ(found->second, text);
     }
-    for (const auto& [path, text] : after)
-        CHECK(path.find(".ducat-merge-") == std::string::npos);
 }
 
 TransferResult merge(const fs::path& source, const fs::path& target)
@@ -112,7 +110,7 @@ TransferResult merge(const fs::path& source, const fs::path& target)
     return run_transfer(nullptr, TransferKind::merge, {{source.string(), target.string()}});
 }
 
-// The rules, with the target keeping everything.
+// The rules: moved when missing, trashed when the same, left otherwise.
 void test_rules()
 {
     TempDir temp;
@@ -131,7 +129,6 @@ void test_rules()
     put(target / "sub" / "y", "y", 2);
     put(source / "sub" / "deep" / "z", "z", 2);
     put(source / "clash", "file", 2);
-    fs::create_directories(target / "clash");
     put(target / "clash" / "inside", "i", 2);
     put(target / "only_b.txt", "b", 2);
     // One second apart, as on FAT, counts as the same.
@@ -142,34 +139,54 @@ void test_rules()
     const Files before = snapshot(target);
 
     const TransferResult result = merge(source, target);
-    check_target_kept(target, before, {{"newer.txt", "new"}});
+    check_target_kept(target, before);
     CHECK_EQ(read(target / "only_a.txt"), std::string("a"));
     CHECK_EQ(read(target / "sub" / "x"), std::string("x"));
     CHECK_EQ(read(target / "sub" / "deep" / "z"), std::string("z"));
-    CHECK_EQ(result.moved, 3u);    // only_a.txt, sub/x, sub/deep
-    CHECK_EQ(result.replaced, 1u); // newer.txt
-    CHECK_EQ(result.trashed, 3u);  // older.txt, same.txt, fat.txt
-    CHECK_EQ(result.left, 2u);     // sametime.txt, clash
-    CHECK_EQ(result.errors.size(), 2u);
-    // What stays in the source keeps it, the rest is gone.
-    CHECK(snapshot(source) == (Files{{"sametime.txt", "aaaa"}, {"clash", "file"}}));
+    CHECK_EQ(result.moved, 3u);   // only_a.txt, sub/x, sub/deep
+    CHECK_EQ(result.trashed, 2u); // same.txt, fat.txt
+    CHECK_EQ(result.left, 4u);    // newer.txt, older.txt, sametime.txt, clash
+    CHECK_EQ(result.errors.size(), 4u);
+    // What differs stays in the source, untouched.
+    CHECK(snapshot(source)
+          == (Files{{"newer.txt", "new"}, {"older.txt", "old"}, {"sametime.txt", "aaaa"},
+                    {"clash", "file"}}));
     CHECK(!fs::exists(source / "sub"));
-    // The target's older newer.txt and the source's older and same files are
-    // in the trash.
+    // Only the source's copies of the target's files are in the trash.
     const Files trash = snapshot(temp.path() / "data" / "Trash" / "files");
-    CHECK(trash.count("newer.txt") && trash.at("newer.txt") == "old");
-    CHECK(trash.count("older.txt") && trash.at("older.txt") == "old");
-    CHECK(trash.count("same.txt") && trash.count("fat.txt"));
+    CHECK(trash == (Files{{"same.txt", "s"}, {"fat.txt", "f"}}));
 
-    // A whole copy merges away completely.
-    put(source / "sametime.txt", "b", 3);
-    fs::remove(source / "clash");
-    fs::last_write_time(source / "sametime.txt", fs::last_write_time(target / "sametime.txt"));
+    // Once the differences are settled by hand, the rest merges away.
+    for (const char* name : {"newer.txt", "older.txt", "sametime.txt", "clash"})
+        fs::remove(source / name);
+    put(source / "late", "l", 1);
     const Files again = snapshot(target);
-    const TransferResult whole = merge(source, target);
+    const TransferResult rest = merge(source, target);
     CHECK(!fs::exists(source));
-    CHECK_EQ(whole.left, 0u);
+    CHECK_EQ(rest.left, 0u);
     check_target_kept(target, again);
+    CHECK_EQ(read(target / "late"), std::string("l"));
+}
+
+// Several merges one after another, as for several selected pairs.
+void test_sequence()
+{
+    TempDir temp;
+    const fs::path a = temp.path() / "A";
+    const fs::path b = temp.path() / "B";
+    const fs::path c = temp.path() / "C";
+    put(a / "a", "a", 1);
+    put(b / "b", "b", 1);
+    put(c / "c", "c", 1);
+    const Files c_before = snapshot(c);
+    // A into B, then A again (gone by then, so skipped), then B into C.
+    const TransferResult result = run_transfer(
+        nullptr, TransferKind::merge,
+        {{a.string(), b.string()}, {a.string(), c.string()}, {b.string(), c.string()}});
+    CHECK(!fs::exists(a) && !fs::exists(b));
+    check_target_kept(c, c_before);
+    CHECK(snapshot(c) == (Files{{"a", "a"}, {"b", "b"}, {"c", "c"}}));
+    CHECK_EQ(result.errors.size(), 1u); // the second merge: A is gone
 }
 
 // The same folder through a symlink, and folders one in the other, are
@@ -193,36 +210,37 @@ void test_refused()
     CHECK(!fs::exists(temp.path() / "data" / "Trash" / "files" / "a"));
 }
 
-// A newer file that cannot be put in the target leaves the target's own.
-void test_failed_replace()
+// A target that cannot be written gains nothing and loses nothing.
+void test_read_only_target()
 {
     if (geteuid() == 0)
         return; // root writes into read-only folders
     TempDir temp;
     const fs::path source = temp.path() / "A";
     const fs::path target = temp.path() / "B";
-    put(source / "x", "new", 1);
-    put(target / "x", "old", 10);
+    put(source / "only_a", "a", 1);
+    put(source / "same", "s", 5);
+    put(target / "same", "s", 5);
     const Files before = snapshot(target);
     fs::permissions(target, fs::perms::owner_read | fs::perms::owner_exec);
     const TransferResult result = merge(source, target);
     fs::permissions(target, fs::perms::owner_all);
     check_target_kept(target, before);
-    CHECK_EQ(read(source / "x"), std::string("new"));
-    CHECK_EQ(result.replaced, 0u);
+    CHECK(snapshot(target) == before);
+    CHECK_EQ(read(source / "only_a"), std::string("a"));
+    CHECK_EQ(result.moved, 0u);
     CHECK_EQ(result.left, 1u);
+    CHECK_EQ(result.trashed, 1u); // the source's copy of "same"
 }
 
-// Without a usable trash, nothing is replaced or thrown away.
+// Without a usable trash, nothing is thrown away.
 void test_no_trash()
 {
     TempDir temp;
     const fs::path source = temp.path() / "A";
     const fs::path target = temp.path() / "B";
-    put(source / "newer", "new", 1);
-    put(target / "newer", "old", 10);
-    put(source / "older", "old", 10);
-    put(target / "older", "new", 1);
+    put(source / "same", "s", 5);
+    put(target / "same", "s", 5);
     put(source / "only_a", "a", 1);
     // A trash whose folder cannot be made.
     fs::create_directories(temp.path() / "locked");
@@ -234,12 +252,10 @@ void test_no_trash()
     if (geteuid() == 0)
         return;
     check_target_kept(target, before);
-    CHECK_EQ(read(source / "newer"), std::string("new"));
-    CHECK_EQ(read(source / "older"), std::string("old"));
+    CHECK_EQ(read(source / "same"), std::string("s"));
     CHECK_EQ(read(target / "only_a"), std::string("a"));
-    CHECK_EQ(result.replaced, 0u);
     CHECK_EQ(result.trashed, 0u);
-    CHECK_EQ(result.left, 2u);
+    CHECK_EQ(result.left, 1u);
 }
 
 // From another file system, as from a removable drive: moved by copying.
@@ -265,25 +281,24 @@ void test_other_file_system()
     put(target / "keep", "k", 1);
     const Files before = snapshot(target);
     const TransferResult result = merge(source, target);
-    check_target_kept(target, before, {{"newer", "new"}});
+    check_target_kept(target, before);
     CHECK_EQ(read(target / "only_a"), std::string("a"));
     CHECK_EQ(read(target / "sub" / "x"), std::string("x"));
-    CHECK_EQ(result.replaced, 1u);
+    CHECK_EQ(read(source / "newer"), std::string("new"));
+    CHECK_EQ(result.left, 1u);
     CHECK(!fs::exists(source / "only_a") && !fs::exists(source / "sub"));
 
-    // A newer file that cannot be copied over leaves the target's in place,
-    // as it is staged before the target's goes to the trash.
+    // A file that cannot be copied over leaves no half copy in the target.
     if (geteuid() != 0) {
-        put(source / "unreadable", "new", 1);
-        put(target / "unreadable", "old", 10);
+        put(source / "unreadable", "u", 1);
         fs::permissions(source / "unreadable", fs::perms::none);
         const Files kept = snapshot(target);
         const TransferResult failed = merge(source, target);
         fs::permissions(source / "unreadable", fs::perms::owner_all);
         check_target_kept(target, kept);
-        CHECK_EQ(failed.replaced, 0u);
-        CHECK_EQ(failed.left, 1u);
-        CHECK_EQ(read(source / "unreadable"), std::string("new"));
+        CHECK(!fs::exists(target / "unreadable"));
+        CHECK_EQ(read(source / "unreadable"), std::string("u"));
+        CHECK_EQ(failed.moved, 0u);
     }
     std::error_code error;
     fs::remove_all(source, error);
@@ -296,8 +311,9 @@ int main(int argc, char* argv[])
     setenv("QT_QPA_PLATFORM", "offscreen", 0);
     QApplication app(argc, argv);
     test_rules();
+    test_sequence();
     test_refused();
-    test_failed_replace();
+    test_read_only_target();
     test_no_trash();
     test_other_file_system();
     return check::result();
