@@ -570,6 +570,42 @@ std::string format_of(const fs::path& file)
     return format;
 }
 
+void test_last_database_path()
+{
+    TempDir temp;
+    const fs::path config = temp.path() / "config";
+    setenv("XDG_CONFIG_HOME", config.c_str(), 1);
+    setenv("XDG_DATA_HOME", (temp.path() / "data").c_str(), 1);
+
+    // No settings: the default database.
+    CHECK(ducat::last_database_path().empty());
+    CHECK_EQ(ducat::starting_database_path(), ducat::default_database_path());
+
+    // As QSettings writes a path with a comma, quotes and a backslash.
+    const fs::path chosen = temp.path() / "a b, c" / "zażółć \"x\" \\y.ducat";
+    fs::create_directories(chosen.parent_path());
+    write_file(chosen, 10);
+    fs::create_directories(config / "siplasplas");
+    std::string escaped;
+    for (const char c : chosen.string()) {
+        if (c == '"' || c == '\\')
+            escaped += '\\';
+        escaped += c;
+    }
+    std::ofstream(config / "siplasplas" / "ducat.conf")
+        << "[General]\ndatabase=\"" << escaped << "\"\n\n[scope]\ndatabase=/other\n";
+    CHECK_EQ(ducat::last_database_path(), chosen.string());
+    CHECK_EQ(ducat::starting_database_path(), chosen.string());
+
+    // A file that is gone falls back to the default.
+    fs::remove(chosen);
+    CHECK(ducat::last_database_path().empty());
+    CHECK_EQ(ducat::starting_database_path(), ducat::default_database_path());
+
+    unsetenv("XDG_CONFIG_HOME");
+    unsetenv("XDG_DATA_HOME");
+}
+
 void test_older_format()
 {
     using Mode = ducat::Database::Mode;
@@ -747,6 +783,7 @@ int main()
     test_compact();
     test_format();
     test_database_path_from_argument();
+    test_last_database_path();
     test_older_format();
     test_contents();
     test_remove_contents_below();

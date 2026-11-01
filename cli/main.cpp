@@ -84,8 +84,9 @@ void print_usage(std::ostream& out)
            "Options:\n"
            "  -h, --help             Show this help and exit\n"
            "  -V, --version          Show version and exit\n"
-           "  -d, --database FILE    Database file (default: "
-           "~/.local/share/siplasplas/ducat/drives.ducat);\n"
+           "  -d, --database FILE    Database file (default: the one chosen last in\n"
+           "                         ducat-gui, else\n"
+           "                         ~/.local/share/siplasplas/ducat/drives.ducat);\n"
            "                         a directory, given by a trailing / or existing,\n"
            "                         means drives.ducat in it\n"
            "  -x, --one-file-system  Do not descend into other file systems (scan)\n"
@@ -156,7 +157,7 @@ void print_directory(const ducat::Node& dir, const std::string& extra)
 }
 
 struct CommandLine {
-    std::string database = ducat::default_database_path();
+    std::string database = ducat::starting_database_path();
     ducat::ScanOptions scan;
     bool archives = false;
     std::string path;
@@ -327,7 +328,7 @@ bool open_sources(std::vector<std::string> files, const std::vector<std::string>
                   Sources& sources)
 {
     if (files.empty())
-        files.push_back(ducat::default_database_path());
+        files.push_back(ducat::starting_database_path());
     std::sort(files.begin(), files.end());
     files.erase(std::unique(files.begin(), files.end()), files.end());
 

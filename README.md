@@ -174,9 +174,11 @@ Contents Here does so below the shown folder.
 
 ### Databases
 
-The default database is `~/.local/share/siplasplas/ducat/drives.ducat` (under
-`$XDG_DATA_HOME` when set). `-d FILE` (`--database`), placed after the command,
-selects another file, by convention with the extension `.ducat`. A leading `~`
+Without `-d`, `ducat` and `ducat-gui` use the database chosen last in the GUI
+(its settings, `~/.config/siplasplas/ducat.conf`), while that file exists,
+else the default database `~/.local/share/siplasplas/ducat/drives.ducat`
+(under `$XDG_DATA_HOME` when set). `-d FILE` (`--database`), placed after the
+command, selects another file, by convention with the extension `.ducat`. A leading `~`
 stands for the home directory, and a directory, given with a trailing `/` or
 existing as one, stands for `drives.ducat` in it.
 

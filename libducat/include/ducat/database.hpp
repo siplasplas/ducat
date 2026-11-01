@@ -188,6 +188,15 @@ inline constexpr std::string_view default_database_name = "drives.ducat";
 // $XDG_DATA_HOME, or in ~/.local/share when that is not set.
 std::string default_database_path();
 
+// The database chosen last in the GUI, kept in its settings
+// siplasplas/ducat.conf in $XDG_CONFIG_HOME or ~/.config (the key
+// "database"), when that file still exists; else empty.
+std::string last_database_path();
+
+// The database to use when none is given: the one chosen last in the GUI,
+// else the default one.
+std::string starting_database_path();
+
 // The database file named by a -d argument: a leading "~" or "~/" stands for
 // $HOME, and a directory, given by a trailing '/' or existing as one, stands
 // for default_database_name in it.

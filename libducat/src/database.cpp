@@ -7,6 +7,7 @@
 #include <tkrzw_dbm_tree.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <filesystem>
@@ -772,6 +773,98 @@ std::string default_database_path()
         dir = std::filesystem::path(home ? home : ".") / ".local" / "share";
     }
     return (dir / "siplasplas" / "ducat" / default_database_name).string();
+}
+
+namespace {
+
+// A value as QSettings writes it to an INI file: maybe in double quotes,
+// with backslash escapes, \xHHHH for other characters.
+std::string unescape_ini_value(std::string_view text)
+{
+    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r'))
+        text.remove_suffix(1);
+    while (!text.empty() && (text.front() == ' ' || text.front() == '\t'))
+        text.remove_prefix(1);
+    std::string value;
+    for (std::size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (c == '"')
+            continue; // the quotes around a value with commas or spaces
+        if (c != '\\' || i + 1 == text.size()) {
+            value += c;
+            continue;
+        }
+        const char next = text[++i];
+        switch (next) {
+        case 'n': value += '\n'; break;
+        case 't': value += '\t'; break;
+        case 'r': value += '\r'; break;
+        case 'x': {
+            // A code point in hex, written as UTF-8.
+            std::size_t end = i + 1;
+            while (end < text.size() && end < i + 9 && std::isxdigit(static_cast<unsigned char>(text[end])))
+                ++end;
+            const unsigned long code =
+                end > i + 1 ? std::stoul(std::string(text.substr(i + 1, end - i - 1)), nullptr, 16) : 0;
+            i = end - 1;
+            if (code < 0x80) {
+                value += static_cast<char>(code);
+            } else if (code < 0x800) {
+                value += static_cast<char>(0xc0 | (code >> 6));
+                value += static_cast<char>(0x80 | (code & 0x3f));
+            } else if (code < 0x10000) {
+                value += static_cast<char>(0xe0 | (code >> 12));
+                value += static_cast<char>(0x80 | ((code >> 6) & 0x3f));
+                value += static_cast<char>(0x80 | (code & 0x3f));
+            } else {
+                value += static_cast<char>(0xf0 | (code >> 18));
+                value += static_cast<char>(0x80 | ((code >> 12) & 0x3f));
+                value += static_cast<char>(0x80 | ((code >> 6) & 0x3f));
+                value += static_cast<char>(0x80 | (code & 0x3f));
+            }
+            break;
+        }
+        default: value += next; break; // \\, \", \; and the like
+        }
+    }
+    return value;
+}
+
+} // namespace
+
+std::string last_database_path()
+{
+    const char* config = std::getenv("XDG_CONFIG_HOME");
+    std::filesystem::path dir;
+    if (config && *config) {
+        dir = config;
+    } else {
+        const char* home = std::getenv("HOME");
+        dir = std::filesystem::path(home ? home : ".") / ".config";
+    }
+    std::ifstream in(dir / "siplasplas" / "ducat.conf");
+    std::string line;
+    bool general = false;
+    while (std::getline(in, line)) {
+        if (line.starts_with('[')) {
+            general = line.starts_with("[General]");
+            continue;
+        }
+        if (!general || !line.starts_with("database="))
+            continue;
+        const std::string path = unescape_ini_value(std::string_view(line).substr(9));
+        std::error_code error;
+        if (!path.empty() && std::filesystem::is_regular_file(path, error))
+            return path;
+        return {};
+    }
+    return {};
+}
+
+std::string starting_database_path()
+{
+    std::string last = last_database_path();
+    return last.empty() ? default_database_path() : last;
 }
 
 std::string database_path_from_argument(std::string_view argument)
