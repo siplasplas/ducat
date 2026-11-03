@@ -76,7 +76,7 @@ if(DUCAT_BUILD_GUI AND Qt6_FOUND)
     # out) shows the icon at once. Skipped for packaging (DESTDIR) and when
     # the tools are missing.
     install(CODE "
-        if(NOT \"\$ENV{DESTDIR}\")
+        if(\"\$ENV{DESTDIR}\" STREQUAL \"\")
             set(data \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}\")
             find_program(gtk_update_icon_cache gtk-update-icon-cache)
             find_program(update_desktop_database update-desktop-database)
