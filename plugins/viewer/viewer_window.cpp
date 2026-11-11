@@ -1,6 +1,9 @@
 #include "viewer_window.hpp"
 
 #include "hex_view_widget.hpp"
+#include "viewer_find_target.hpp"
+
+#include "siplasplas/plugin/FindPlugin.h"
 
 #include "wid/FindBar.h"
 #include "wid/TextViewer.h"
@@ -12,6 +15,7 @@
 #include <qce/kate/KateTheme.h>
 #include <qce/kate/KateXmlReader.h>
 #include <qceditor/EditorTab.h>
+#include <qceditor/FindPlugin.h>
 #include <qceditor/SyntaxData.h>
 
 #include <QAction>
@@ -215,9 +219,18 @@ void ViewerWindow::create_text_viewer(const char* data, qint64 size)
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
     text_viewer_ = new wid::TextViewer(data, size, text_box_);
-    find_bar_ = new wid::FindBar(text_viewer_, text_box_);
-    layout->addWidget(find_bar_);
-    layout->addWidget(text_viewer_, 1);
+    if (spp::FindPlugin* plugin = qceditor::findPlugin()) {
+        // Below the text, which never moves; the viewer seeks itself.
+        plugin_find_target_ = std::make_unique<ViewerFindTarget>(text_viewer_);
+        plugin_find_bar_ = plugin->createFindBar(text_box_);
+        plugin_find_bar_->setTarget(plugin_find_target_.get());
+        layout->addWidget(text_viewer_, 1);
+        layout->addWidget(plugin_find_bar_->widget());
+    } else {
+        find_bar_ = new wid::FindBar(text_viewer_, text_box_);
+        layout->addWidget(find_bar_);
+        layout->addWidget(text_viewer_, 1);
+    }
     apply_highlighter();
     centralWidget()->layout()->addWidget(text_box_);
     text_viewer_->setFocus();
@@ -243,11 +256,16 @@ void ViewerWindow::apply_highlighter()
 
 void ViewerWindow::clear_view()
 {
-    // The text box first: its find bar stops searching before the file is unmapped.
+    // The plugin's bar lets go of the viewer before either goes; then the
+    // text box, whose viewer stops searching before the file is unmapped.
+    if (plugin_find_bar_)
+        plugin_find_bar_->setTarget(nullptr);
     delete text_box_;
     text_box_ = nullptr;
     text_viewer_ = nullptr;
     find_bar_ = nullptr;
+    plugin_find_bar_ = nullptr;
+    plugin_find_target_.reset();
     folding_.reset();
     highlighter_.reset();
     delete code_view_;
@@ -264,7 +282,9 @@ void ViewerWindow::clear_view()
 
 void ViewerWindow::show_search()
 {
-    if (find_bar_)
+    if (plugin_find_bar_)
+        plugin_find_bar_->showFind();
+    else if (find_bar_)
         find_bar_->showSearch();
     else if (code_view_)
         code_view_->showSearch();
@@ -272,7 +292,12 @@ void ViewerWindow::show_search()
 
 void ViewerWindow::find_next(bool backwards)
 {
-    if (find_bar_)
+    if (plugin_find_bar_) {
+        if (backwards)
+            plugin_find_bar_->findPrevious();
+        else
+            plugin_find_bar_->findNext();
+    } else if (find_bar_)
         find_bar_->findNext(backwards);
     else if (code_view_)
         code_view_->findNext(backwards);

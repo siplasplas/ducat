@@ -7,6 +7,7 @@
 
 #include <qce/encoding/Encoding.h>
 #include <qceditor/EditorWindow.h>
+#include <qceditor/FindPlugin.h>
 
 #include <QCoreApplication>
 #include <QDir>
@@ -63,6 +64,13 @@ public:
     bool close_editor() override
     {
         return !editor_ || !editor_->isVisible() || editor_->close();
+    }
+
+    void set_find_plugin(spp::FindPlugin* plugin) override
+    {
+        // The editor's tabs (also the viewer's small files) and the viewer of
+        // large files (ViewerWindow) take it from qceditor.
+        qceditor::setFindPlugin(plugin);
     }
 
 private:

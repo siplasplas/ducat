@@ -10,6 +10,10 @@
 
 class QWidget;
 
+namespace spp {
+class FindPlugin;
+}
+
 namespace ducat {
 
 class ViewerPlugin {
@@ -32,9 +36,14 @@ public:
     // Closes the editor window, asking about unsaved files; returns false
     // when the user chose to keep it open.
     virtual bool close_editor() = 0;
+
+    // The find bar plugin (spp-findbar of siplasplas-plugins) ducat-gui
+    // loaded, for the viewer's and the editor's find bars; nullptr: none,
+    // their own bars. Given before the first view_file() or edit_file().
+    virtual void set_find_plugin(spp::FindPlugin* plugin) = 0;
 };
 
 } // namespace ducat
 
-#define DUCAT_VIEWER_PLUGIN_IID "io.github.siplasplas.ducat.ViewerPlugin/2"
+#define DUCAT_VIEWER_PLUGIN_IID "io.github.siplasplas.ducat.ViewerPlugin/3"
 Q_DECLARE_INTERFACE(ducat::ViewerPlugin, DUCAT_VIEWER_PLUGIN_IID)

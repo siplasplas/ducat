@@ -81,9 +81,9 @@ if(DUCAT_BUILD_GUI AND Qt6_FOUND)
     set(CMAKE_POSITION_INDEPENDENT_CODE "${ducat_pic_before}")
 
     # Shared plugins (github.com/siplasplas/siplasplas-plugins, LGPL-3.0-only),
-    # shared with gemini-commander: their interfaces for the GUI, and the
-    # archive plugin (spp-archive, with libarchive) built into the plugin
-    # directories above. FETCHCONTENT_SOURCE_DIR_SIPLASPLAS_PLUGINS may name a
+    # shared with gemini-commander: their interfaces for the GUI, the archive
+    # plugin (spp-archive, with libarchive) and the find bar plugin
+    # (spp-findbar) built into the plugin directories above. FETCHCONTENT_SOURCE_DIR_SIPLASPLAS_PLUGINS may name a
     # local checkout.
     set(SPP_PLUGIN_BUILD_DIR "${DUCAT_PLUGIN_BUILD_DIR}")
     set(SPP_PLUGIN_INSTALL_DIR "${DUCAT_PLUGIN_INSTALL_DIR}")
@@ -93,7 +93,8 @@ if(DUCAT_BUILD_GUI AND Qt6_FOUND)
         set(SPP_BUILD_ARCHIVE OFF)
     endif()
     set(SPP_BUILD_EDITOR OFF)
-    set(SPP_BUILD_FINDBAR OFF)
+    # The find bar of the viewer plugin's viewer and editor.
+    set(SPP_BUILD_FINDBAR ${DUCAT_BUILD_PLUGINS})
     set(SPP_BUILD_TESTS OFF)
     FetchContent_Declare(siplasplas_plugins
         GIT_REPOSITORY https://github.com/siplasplas/siplasplas-plugins.git

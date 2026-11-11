@@ -16,19 +16,20 @@ set(QCE_BUILD_GRAMMAR ON)
 set(QCE_BUILD_SPELL ON)
 set(QCE_BUILD_SPELL_DOWNLOADER ON)
 set(QCE_BUILD_DIFF ON)
-# An installed static cpg may lack position-independent code, which the
-# plugin needs: qcodeedit then fetches cpg and builds it here.
+# An installed static cpg or DiffMerge may lack position-independent code,
+# which the plugin needs: qcodeedit then fetches them and builds them here.
 set(CMAKE_DISABLE_FIND_PACKAGE_cpg TRUE)
+set(CMAKE_DISABLE_FIND_PACKAGE_DiffMerge TRUE)
 FetchContent_Declare(qcodeedit
     GIT_REPOSITORY https://github.com/siplasplas/qcodeedit.git
-    GIT_TAG v1.66.4
+    GIT_TAG v1.71.0
     GIT_SHALLOW TRUE
     EXCLUDE_FROM_ALL
 )
 set(QCEDITOR_BUILD_APP OFF)
 FetchContent_Declare(qceditor
     GIT_REPOSITORY https://github.com/siplasplas/qceditor.git
-    GIT_TAG v1.25.0
+    GIT_TAG v1.29.0
     GIT_SHALLOW TRUE
     EXCLUDE_FROM_ALL
 )
@@ -36,7 +37,7 @@ FetchContent_Declare(qceditor
 # without the cpg submodule, which these sources do not use.
 FetchContent_Declare(ducat_textviewers
     GIT_REPOSITORY https://github.com/ideorg/textviewers.git
-    GIT_TAG v1.2
+    GIT_TAG v1.5
     GIT_SHALLOW TRUE
     GIT_SUBMODULES ""
     SOURCE_SUBDIR do-not-add
@@ -46,10 +47,15 @@ set(textviewers_dir "${ducat_textviewers_SOURCE_DIR}")
 
 find_package(Qt6 REQUIRED COMPONENTS Concurrent)
 find_package(ICU REQUIRED COMPONENTS uc i18n)
+# Regular expressions in the large-file viewer (textviewers), libpcre2-dev.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(DUCAT_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
 ducat_add_plugin(ducat-viewer
     hex_view_widget.cpp
     hex_view_widget.hpp
+    viewer_find_target.cpp
+    viewer_find_target.hpp
     viewer_plugin.cpp
     viewer_window.cpp
     viewer_window.hpp
@@ -69,6 +75,7 @@ ducat_add_plugin(ducat-viewer
     "${textviewers_dir}/logic/ChangeableDocument.cpp"
     "${textviewers_dir}/logic/LineIndexedDocument.cpp"
     "${textviewers_dir}/logic/Searcher.cpp"
+    "${textviewers_dir}/logic/RegexSearcher.cpp"
     "${textviewers_dir}/misc/selection.cpp"
 )
 # SYSTEM: its headers' warnings do not show in ducat's own files.
@@ -80,9 +87,11 @@ target_link_libraries(ducat-viewer PRIVATE
     qcodeedit::katedata
     Qt6::Concurrent
     ICU::uc ICU::i18n
+    PkgConfig::DUCAT_PCRE2
+    siplasplas::plugin-api
 )
 # Warnings for ducat's own code only.
-set_source_files_properties(viewer_plugin.cpp viewer_window.cpp PROPERTIES
+set_source_files_properties(viewer_find_target.cpp viewer_plugin.cpp viewer_window.cpp PROPERTIES
     COMPILE_OPTIONS "-Wall;-Wextra;-Wpedantic")
 
 # Encoding detection reads cpg's languages.txt and n-gram models at run time.

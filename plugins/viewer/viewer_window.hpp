@@ -19,6 +19,10 @@ namespace wid {
 class FindBar;
 class TextViewer;
 }
+namespace spp {
+class FindBar;
+}
+class ViewerFindTarget;
 
 // A read-only viewer of one file at a time, as text or hex, after the viewer
 // of gemini-commander. Small files are shown in qceditor's editor, with
@@ -63,7 +67,11 @@ private:
 
     QWidget* text_box_ = nullptr;
     wid::TextViewer* text_viewer_ = nullptr;
+    // The find bar of large files: the find bar plugin's below the text
+    // (with plugin_find_target_), or else textviewers' own above it.
     wid::FindBar* find_bar_ = nullptr;
+    spp::FindBar* plugin_find_bar_ = nullptr;
+    std::unique_ptr<ViewerFindTarget> plugin_find_target_;
     qceditor::EditorTab* code_view_ = nullptr;
     HexViewWidget* hex_view_ = nullptr;
     std::unique_ptr<qce::RulesHighlighter> highlighter_;

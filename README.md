@@ -403,10 +403,18 @@ fetches their dependencies from GitHub, which needs network access once;
   [qceditor](https://github.com/siplasplas/qceditor) and
   [qcodeedit](https://github.com/siplasplas/qcodeedit) for small files and
   [textviewers](https://github.com/ideorg/textviewers) for large ones. It needs
-  `sudo apt install libicu-dev libhunspell-dev libbotan-2-dev`. Kate syntax
-  definitions are read from, and downloaded to, `~/.local/share/kate-data`,
-  shared with the other programs using qcodeedit. Without the plugin, F3 does
-  nothing but say so.
+  `sudo apt install libicu-dev libhunspell-dev libbotan-2-dev libpcre2-dev`.
+  Kate syntax definitions are read from, and downloaded to,
+  `~/.local/share/kate-data`, shared with the other programs using qcodeedit.
+  Without the plugin, F3 does nothing but say so.
+- `spp-findbar`: the find (and replace) bar of the viewer and the editor,
+  the find bar plugin of siplasplas-plugins, below the text, which never
+  moves: wrap around, match case, whole words, regular expressions, in large
+  files the matches in view marked and the rest searched in the background
+  with progress; replacing in the editor with Exclude, preserving case and,
+  when opened for replacing with several lines selected, in the selection;
+  F3 and Shift+F3 go on without opening the bar. `ducat-gui` gives it to the
+  viewer plugin; without it the viewer and the editor use their own bars.
 - `spp-archive`: reading archives, the archive plugin of
   [siplasplas-plugins](https://github.com/siplasplas/siplasplas-plugins),
   shared with gemini-commander, built when libarchive is found: Enter on an

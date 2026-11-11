@@ -2,6 +2,7 @@
 
 #include "ducat/plugin/viewer.hpp"
 #include "siplasplas/plugin/ArchivePlugin.h"
+#include "siplasplas/plugin/FindPlugin.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -66,10 +67,17 @@ Plugins::Plugins()
                 take(archive, archive_, "archives");
                 continue;
             }
+            if (auto* find = qobject_cast<spp::FindPlugin*>(plugin)) {
+                take(find, find_, "find bar");
+                continue;
+            }
             report_ << QStringLiteral("%1: not a ducat plugin").arg(file);
             loader.unload();
         }
     }
+    // The viewer's and the editor's find bars.
+    if (viewer_)
+        viewer_->set_find_plugin(find_);
 }
 
 QString choose_directory(QWidget* parent, const QString& caption, const QString& start)

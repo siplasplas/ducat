@@ -10,6 +10,7 @@ class ViewerPlugin;
 }
 namespace spp {
 class ArchivePlugin;
+class FindPlugin;
 }
 
 // The plugins of ducat-gui, loaded once from the plugin directories:
@@ -26,6 +27,9 @@ public:
     // none was loaded.
     spp::ArchivePlugin* archive() const { return archive_; }
 
+    // The find bar plugin (spp-findbar), given to the viewer plugin, or null.
+    spp::FindPlugin* find() const { return find_; }
+
     // What was found, for --plugins: one line per plugin file or problem.
     const QStringList& report() const { return report_; }
 
@@ -37,6 +41,7 @@ private:
 
     ducat::ViewerPlugin* viewer_ = nullptr;
     spp::ArchivePlugin* archive_ = nullptr;
+    spp::FindPlugin* find_ = nullptr;
     QStringList report_;
 };
 
