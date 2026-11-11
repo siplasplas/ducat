@@ -386,18 +386,18 @@ libzstd the build warns and makes uncompressed databases; such a build cannot
 read compressed ones.
 
 The GUI `ducat-gui` (in `build/gui`) is built when Qt 6 is found
-(`sudo apt install qt6-base-dev`); `-DDUCAT_BUILD_GUI=OFF` skips it.
+(`sudo apt install qt6-base-dev`); `-DDUCAT_BUILD_GUI=OFF` skips it. Its
+file dialogs (Scan Folder, Database) are those of
+[qt-extra](https://github.com/siplasplas/qt-extra) (`QxFileDialog`), which
+configuring fetches (v2.7.1) and builds into it.
 
 ### Plugins
 
 Features with further dependencies come as plugins of the GUI, so that
-`ducat-gui` itself depends only on Qt and works without them. Configuring
+`ducat-gui` itself depends only on Qt and qt-extra and works without them. Configuring
 fetches their dependencies from GitHub, which needs network access once;
 `-DDUCAT_BUILD_PLUGINS=OFF` skips the plugins. The plugins are:
 
-- `ducat-filedialog`: the file dialogs of
-  [qt-extra](https://github.com/siplasplas/qt-extra) (`QxFileDialog`) for Scan
-  Folder and Database; without it, Qt's own dialogs are used.
 - `ducat-viewer`: the F3 viewer and the F4 editor, as in
   [gemini-commander](https://github.com/siplasplas/gemini-commander), with
   [qceditor](https://github.com/siplasplas/qceditor) and

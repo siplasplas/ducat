@@ -27,7 +27,7 @@ add_executable(ducat-gui
 )
 
 set_target_properties(ducat-gui PROPERTIES AUTOMOC ON)
-target_link_libraries(ducat-gui PRIVATE ducat::libducat ducat_plugin_api siplasplas::plugin-api Qt6::Widgets)
+target_link_libraries(ducat-gui PRIVATE ducat::libducat ducat_plugin_api siplasplas::plugin-api qt-extra Qt6::Widgets)
 
 # Opening a folder in gemini-commander over D-Bus. On Wayland an
 # xdg-activation token brings its window to the front; Qt offers it only

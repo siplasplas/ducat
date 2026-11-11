@@ -64,12 +64,27 @@ if(DUCAT_ARCHIVES AND LIBARCHIVE_FOUND)
 endif()
 add_subdirectory(cli)
 if(DUCAT_BUILD_GUI AND Qt6_FOUND)
+    include(FetchContent)
+    # qt-extra (github.com/siplasplas/qt-extra, LGPL-3.0-only): the file
+    # dialogs of the GUI (QxFileDialog), and the widgets qceditor needs in the
+    # viewer plugin. Always fetched and built here, position-independent so
+    # that it can go into the plugins (an installed static qt-extra is not),
+    # without its install rules.
+    set(ducat_pic_before "${CMAKE_POSITION_INDEPENDENT_CODE}")
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    FetchContent_Declare(qt-extra
+        GIT_REPOSITORY https://github.com/siplasplas/qt-extra.git
+        GIT_TAG v2.7.1
+        GIT_SHALLOW TRUE
+        EXCLUDE_FROM_ALL)
+    FetchContent_MakeAvailable(qt-extra)
+    set(CMAKE_POSITION_INDEPENDENT_CODE "${ducat_pic_before}")
+
     # Shared plugins (github.com/siplasplas/siplasplas-plugins, LGPL-3.0-only),
     # shared with gemini-commander: their interfaces for the GUI, and the
     # archive plugin (spp-archive, with libarchive) built into the plugin
     # directories above. FETCHCONTENT_SOURCE_DIR_SIPLASPLAS_PLUGINS may name a
     # local checkout.
-    include(FetchContent)
     set(SPP_PLUGIN_BUILD_DIR "${DUCAT_PLUGIN_BUILD_DIR}")
     set(SPP_PLUGIN_INSTALL_DIR "${DUCAT_PLUGIN_INSTALL_DIR}")
     if(DUCAT_BUILD_PLUGINS AND DUCAT_ARCHIVES)

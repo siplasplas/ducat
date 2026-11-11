@@ -1,14 +1,15 @@
 #include "plugins.hpp"
 
-#include "ducat/plugin/file_dialog.hpp"
 #include "ducat/plugin/viewer.hpp"
 #include "siplasplas/plugin/ArchivePlugin.h"
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QFileDialog>
+#include <QFileInfo>
 #include <QLibrary>
 #include <QPluginLoader>
+
+#include "qxfiledialog.h"
 
 Plugins& Plugins::instance()
 {
@@ -57,10 +58,6 @@ Plugins::Plugins()
                                    .arg(file, QLatin1String(kind), found->name());
                 }
             };
-            if (auto* dialog = qobject_cast<ducat::FileDialogPlugin*>(plugin)) {
-                take(dialog, file_dialog_, "file dialog");
-                continue;
-            }
             if (auto* viewer = qobject_cast<ducat::ViewerPlugin*>(plugin)) {
                 take(viewer, viewer_, "viewer");
                 continue;
@@ -77,25 +74,23 @@ Plugins::Plugins()
 
 QString choose_directory(QWidget* parent, const QString& caption, const QString& start)
 {
-    if (ducat::FileDialogPlugin* plugin = Plugins::instance().file_dialog())
-        return plugin->choose_directory(parent, caption, start);
-    return QFileDialog::getExistingDirectory(
-        parent, caption, start, QFileDialog::ShowDirsOnly | QFileDialog::DontUseNativeDialog);
+    return QxFileDialog::getExistingDirectory(parent, caption, start);
 }
 
 QString choose_file(QWidget* parent, const QString& caption, const QString& start,
                     const QString& filter, const QString& default_suffix)
 {
-    if (ducat::FileDialogPlugin* plugin = Plugins::instance().file_dialog())
-        return plugin->choose_file(parent, caption, start, filter, default_suffix);
-
-    // Qt's own dialog rather than the platform's.
-    QFileDialog dialog(parent, caption, start, filter);
-    dialog.setAcceptMode(QFileDialog::AcceptSave);
-    dialog.setOptions(QFileDialog::DontUseNativeDialog | QFileDialog::DontConfirmOverwrite);
+    // Save mode accepts new names as well as existing files, without asking
+    // before reusing one.
+    QxFileDialog dialog(parent, QxFileDialog::Save);
+    dialog.setWindowTitle(caption);
+    dialog.setNameFilter(filter);
     dialog.setDefaultSuffix(default_suffix);
-    dialog.selectFile(start);
-    if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty())
+    if (QFileInfo(start).isDir())
+        dialog.setDirectory(start);
+    else
+        dialog.setFileName(start); // enters its directory and selects it
+    if (dialog.exec() != QDialog::Accepted)
         return {};
-    return dialog.selectedFiles().first();
+    return dialog.selectedFile();
 }

@@ -6,7 +6,6 @@
 class QWidget;
 
 namespace ducat {
-class FileDialogPlugin;
 class ViewerPlugin;
 }
 namespace spp {
@@ -19,9 +18,6 @@ class ArchivePlugin;
 class Plugins {
 public:
     static Plugins& instance();
-
-    // The file dialog plugin, or null when none was loaded.
-    ducat::FileDialogPlugin* file_dialog() const { return file_dialog_; }
 
     // The viewer plugin (F3), or null when none was loaded.
     ducat::ViewerPlugin* viewer() const { return viewer_; }
@@ -39,13 +35,12 @@ public:
 private:
     Plugins();
 
-    ducat::FileDialogPlugin* file_dialog_ = nullptr;
     ducat::ViewerPlugin* viewer_ = nullptr;
     spp::ArchivePlugin* archive_ = nullptr;
     QStringList report_;
 };
 
-// File dialogs through the plugin when there is one, else Qt's own dialog.
+// File dialogs of qt-extra (QxFileDialog).
 QString choose_directory(QWidget* parent, const QString& caption, const QString& start);
 QString choose_file(QWidget* parent, const QString& caption, const QString& start,
                     const QString& filter, const QString& default_suffix);
