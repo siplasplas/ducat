@@ -8,13 +8,17 @@
 #include <QRegularExpression>
 
 std::optional<ducat::Node> list_archive(spp::ArchivePlugin& plugin, const std::string& path,
-                                        std::string& error)
+                                        std::string& error, const spp::ArchiveProgress& progress,
+                                        const spp::ArchivePassword& password)
 {
     QList<spp::ArchiveItem> items;
     QString message;
-    if (!plugin.list(QString::fromStdString(path), items, message)) {
-        error = message.toStdString();
-        return std::nullopt;
+    const bool ok = plugin.list(QString::fromStdString(path), items, message, progress, password);
+    error.clear();
+    if (!ok) {
+        error = message.isEmpty() ? std::string("cannot be read") : message.toStdString();
+        if (items.isEmpty())
+            return std::nullopt;
     }
     std::vector<ducat::ArchiveEntry> entries;
     entries.reserve(static_cast<std::size_t>(items.size()));
@@ -46,7 +50,7 @@ std::size_t read_archives_in(spp::ArchivePlugin& plugin, const std::string& path
             continue;
         std::string error;
         std::optional<ducat::Node> contents = list_archive(plugin, ducat::join_path(path, child.name), error);
-        if (!contents) {
+        if (!contents || !error.empty()) {
             ++errors;
             continue;
         }

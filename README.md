@@ -163,6 +163,11 @@ rounded up to 512 bytes.
 into stored contents. In the GUI, Enter on an archive opens its stored
 contents, or else, with the archive plugin, reads the archive on disk and
 shows its contents without storing them; Refresh (Ctrl+R) there stores them.
+Reading it shows a progress dialog when it takes a while (reading tar.gz and
+the like decompresses all of it), which Cancel stops, and asks for the
+password of an encrypted archive; an archive that could be read only in part
+opens with what was read and a message. A scan stores only archives read
+whole, without asking for passwords.
 Options > Read Archives When Scanning makes the GUI's scans store archives as
 `scan -a` does. The database format "ducat 2" for this reads older databases
 and marks them as format 2 when they are written.

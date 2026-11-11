@@ -32,6 +32,7 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QMenu>
+#include <QProgressDialog>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QProgressBar>
@@ -372,14 +373,41 @@ void MainWindow::open_archive(const std::string& path)
                        .arg(to_qstring(path)));
         return;
     }
+    // Listing tar.gz and the like decompresses all of it: a progress dialog
+    // (after a moment) that can cancel it, and the password of an encrypted
+    // archive asked for.
+    const QString name = QFileInfo(to_qstring(path)).fileName();
+    QProgressDialog progress(tr("Reading %1…").arg(name), tr("Cancel"), 0, 1000, this);
+    progress.setWindowTitle(tr("Open Archive"));
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(300);
+    progress.setAutoReset(false);
+    progress.setValue(0);
+    const spp::ArchiveProgress on_progress = [&progress](qint64 done, qint64 total, const QString&) {
+        if (total > 0)
+            progress.setValue(static_cast<int>(std::clamp<qint64>(done * 1000 / total, 0, 999)));
+        QCoreApplication::processEvents();
+        return !progress.wasCanceled();
+    };
+    const spp::ArchivePassword ask_password = [&progress](const QString& archive) {
+        bool ok = false;
+        const QString password = QInputDialog::getText(
+            &progress, tr("Password"), tr("Password for %1:").arg(QFileInfo(archive).fileName()),
+            QLineEdit::Password, QString(), &ok);
+        return ok ? password : QString();
+    };
     std::string error;
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    std::optional<ducat::Node> root = list_archive(*plugin, path, error);
-    QApplication::restoreOverrideCursor();
+    std::optional<ducat::Node> root = list_archive(*plugin, path, error, on_progress, ask_password);
+    const bool cancelled = progress.wasCanceled();
+    progress.close();
+    if (cancelled)
+        return;
     if (!root) {
         show_error(tr("%1: %2").arg(to_qstring(path), QString::fromStdString(error)));
         return;
     }
+    if (!error.empty())
+        show_error(tr("Only part of %1 could be read: %2").arg(name, QString::fromStdString(error)));
     live_ = LiveArchive{path, std::move(*root)};
     open_directory(path);
 }
