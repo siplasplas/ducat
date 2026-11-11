@@ -402,8 +402,15 @@ fetches their dependencies from GitHub, which needs network access once;
   definitions are read from, and downloaded to, `~/.local/share/kate-data`,
   shared with the other programs using qcodeedit. Without the plugin, F3 does
   nothing but say so.
-- `ducat-archive-plugin`: reading archives with libarchive, built when
-  libarchive is found: Enter on an archive on disk and scans with archives.
+- `spp-archive`: reading archives, the archive plugin of
+  [siplasplas-plugins](https://github.com/siplasplas/siplasplas-plugins),
+  shared with gemini-commander, built when libarchive is found: Enter on an
+  archive on disk and scans with archives. It reads what libarchive cannot
+  (some rar, 7z with encrypted names) with `lsar` and `7z` when they are
+  installed, and multi-volume archives as a whole from their first part, so a
+  scan lists only that part (`name.part1.rar`, not `name.part2.rar` …). It
+  replaces the earlier `ducat-archive-plugin`; an installed
+  `lib/ducat/plugins/ducat-archive-plugin.so` can be removed.
 
 `ducat-gui` loads plugins from the directories in `$DUCAT_PLUGIN_PATH`
 (separated by `:`), from `lib/ducat/plugins` of its installation and, when run

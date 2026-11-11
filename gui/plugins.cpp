@@ -1,8 +1,8 @@
 #include "plugins.hpp"
 
-#include "ducat/plugin/archive.hpp"
 #include "ducat/plugin/file_dialog.hpp"
 #include "ducat/plugin/viewer.hpp"
+#include "siplasplas/plugin/ArchivePlugin.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -65,7 +65,7 @@ Plugins::Plugins()
                 take(viewer, viewer_, "viewer");
                 continue;
             }
-            if (auto* archive = qobject_cast<ducat::ArchivePlugin*>(plugin)) {
+            if (auto* archive = qobject_cast<spp::ArchivePlugin*>(plugin)) {
                 take(archive, archive_, "archives");
                 continue;
             }

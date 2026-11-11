@@ -64,6 +64,27 @@ if(DUCAT_ARCHIVES AND LIBARCHIVE_FOUND)
 endif()
 add_subdirectory(cli)
 if(DUCAT_BUILD_GUI AND Qt6_FOUND)
+    # Shared plugins (github.com/siplasplas/siplasplas-plugins, LGPL-3.0-only),
+    # shared with gemini-commander: their interfaces for the GUI, and the
+    # archive plugin (spp-archive, with libarchive) built into the plugin
+    # directories above. FETCHCONTENT_SOURCE_DIR_SIPLASPLAS_PLUGINS may name a
+    # local checkout.
+    include(FetchContent)
+    set(SPP_PLUGIN_BUILD_DIR "${DUCAT_PLUGIN_BUILD_DIR}")
+    set(SPP_PLUGIN_INSTALL_DIR "${DUCAT_PLUGIN_INSTALL_DIR}")
+    if(DUCAT_BUILD_PLUGINS AND DUCAT_ARCHIVES)
+        set(SPP_BUILD_ARCHIVE ON)
+    else()
+        set(SPP_BUILD_ARCHIVE OFF)
+    endif()
+    set(SPP_BUILD_EDITOR OFF)
+    set(SPP_BUILD_FINDBAR OFF)
+    set(SPP_BUILD_TESTS OFF)
+    FetchContent_Declare(siplasplas_plugins
+        GIT_REPOSITORY https://github.com/siplasplas/siplasplas-plugins.git
+        GIT_TAG v0.13.0
+        GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(siplasplas_plugins)
     add_subdirectory(gui)
     if(DUCAT_BUILD_PLUGINS)
         add_subdirectory(plugins)

@@ -1,4 +1,5 @@
 #include "main_window.hpp"
+#include "archives.hpp"
 
 #include "directory_model.hpp"
 #include "duplicates_dialog.hpp"
@@ -14,7 +15,7 @@
 #include "ducat/format.hpp"
 #include "ducat/path.hpp"
 #include "ducat/version.hpp"
-#include "ducat/plugin/archive.hpp"
+#include "siplasplas/plugin/ArchivePlugin.h"
 #include "ducat/plugin/viewer.hpp"
 
 #include <QAction>
@@ -361,7 +362,7 @@ void MainWindow::open_archive(const std::string& path)
         show_error(tr("Archives inside archives are not opened"));
         return;
     }
-    ducat::ArchivePlugin* plugin = Plugins::instance().archive();
+    spp::ArchivePlugin* plugin = Plugins::instance().archive();
     if (!plugin) {
         show_error(tr("The archive plugin is not installed; see ducat-gui --plugins"));
         return;
@@ -373,7 +374,7 @@ void MainWindow::open_archive(const std::string& path)
     }
     std::string error;
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    std::optional<ducat::Node> root = plugin->list(path, error);
+    std::optional<ducat::Node> root = list_archive(*plugin, path, error);
     QApplication::restoreOverrideCursor();
     if (!root) {
         show_error(tr("%1: %2").arg(to_qstring(path), QString::fromStdString(error)));
@@ -891,11 +892,11 @@ void MainWindow::start_scan(const std::string& path)
     // Archives are read as their directories complete. The plugin's methods
     // run on the scan threads; it lives as long as the program.
     auto archive_errors = std::make_shared<std::atomic<std::size_t>>(0);
-    if (ducat::ArchivePlugin* archives =
+    if (spp::ArchivePlugin* archives =
             archives_action_->isChecked() ? Plugins::instance().archive() : nullptr) {
         options.on_directory = [archives, archive_errors](const std::string& dir_path,
                                                           ducat::Node& dir) {
-            *archive_errors += archives->read_archives_in(dir_path, dir).size();
+            *archive_errors += read_archives_in(*archives, dir_path, dir);
         };
     }
 
